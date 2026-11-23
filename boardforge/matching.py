@@ -208,9 +208,21 @@ def rank_jobs(
         if preferences.roles and not any(item.kind == "role" for item in structured_evidence):
             continue
         score = lexical_score(job, preferences, query) + bonus
+        status = "recommended"
+
+        # Unknown metadata should not outrank candidates that actually satisfy a
+        # stated numeric constraint. Keep them visible, but demote for verification.
+        if preferences.min_salary_lpa is not None and salary_min_lpa(job) is None:
+            score -= 0.12
+            status = "needs_verification"
+        if preferences.max_required_experience_years is not None and job.min_experience_years is None:
+            score -= 0.08
+            status = "needs_verification"
+
         matches.append(Match(
             job=job,
             score=round(score, 4),
+            status=status,
             reasons=reasons,
             risks=risks,
             hard_violations=[],
