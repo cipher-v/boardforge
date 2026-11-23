@@ -1319,7 +1319,8 @@
         "ai-rag-remote",
         "ai-ml-pune",
         "ai-high-salary",
-        "ai-unpaid-pune"
+        "ai-unpaid-pune",
+        "ai-low-salary"
       ],
       "forbidden_ids": [
         "ai-llm-blr"
@@ -1345,7 +1346,8 @@
         "ai-rag-remote",
         "ai-ml-pune",
         "ai-high-salary",
-        "ai-unpaid-pune"
+        "ai-unpaid-pune",
+        "ai-low-salary"
       ],
       "forbidden_ids": [
         "ai-llm-blr"
@@ -1371,7 +1373,8 @@
         "ai-rag-remote",
         "ai-ml-pune",
         "ai-high-salary",
-        "ai-unpaid-pune"
+        "ai-unpaid-pune",
+        "ai-low-salary"
       ],
       "forbidden_ids": [
         "ai-llm-blr"
@@ -1397,7 +1400,8 @@
         "ai-rag-remote",
         "ai-ml-pune",
         "ai-high-salary",
-        "ai-unpaid-pune"
+        "ai-unpaid-pune",
+        "ai-low-salary"
       ],
       "forbidden_ids": [
         "ai-llm-blr"
@@ -1423,7 +1427,8 @@
         "ai-rag-remote",
         "ai-ml-pune",
         "ai-high-salary",
-        "ai-unpaid-pune"
+        "ai-unpaid-pune",
+        "ai-low-salary"
       ],
       "forbidden_ids": [
         "ai-llm-blr"
