@@ -34,9 +34,22 @@ def hard_violations(job: Job, p: Preferences) -> list[str]:
     text = job_text(job).lower()
     out: list[str] = []
 
-    if p.countries and job.country:
-        if job.country.lower() not in {x.lower() for x in p.countries}:
-            out.append("country")
+    if p.countries:
+        allowed = {x.lower() for x in p.countries}
+        if job.country:
+            if job.country.lower() not in allowed:
+                out.append("country")
+        elif p.locations:
+            # Unknown country is unsafe when the candidate explicitly constrained geography.
+            if not any(loc.lower() in job.location.lower() for loc in p.locations):
+                out.append("country_unknown")
+        elif "india" in allowed and job.location:
+            india_loc = any(x in job.location.lower() for x in [
+                "india","bengaluru","bangalore","pune","hyderabad","gurugram","gurgaon",
+                "mumbai","noida","chennai","delhi","ahmedabad","indore","jaipur","kochi"
+            ])
+            if not india_loc:
+                out.append("country_unknown")
 
     if p.paid_only and any(x in text for x in ["unpaid","no stipend"]):
         out.append("unpaid")
@@ -57,6 +70,29 @@ def hard_violations(job: Job, p: Preferences) -> list[str]:
     return out
 
 
+def _role_fit(job: Job, role: str) -> bool:
+    title = job.title.lower()
+    desc = job.description.lower()
+    role_low = role.lower()
+
+    if role_low == "computer vision":
+        return "computer vision" in title or any(x in title for x in ["vision engineer","perception engineer"])
+    if role_low == "backend":
+        return any(x in title for x in ["backend","back-end","software engineer","full stack","full-stack"])
+    if role_low == "ai/ml":
+        return any(x in title for x in ["ai","ml","machine learning","deep learning","research engineer","research scientist"])
+    if role_low == "software engineering":
+        return any(x in title for x in ["software engineer","developer","full stack","full-stack"])
+    if role_low == "data engineering":
+        return "data engineer" in title
+    if role_low == "data science":
+        return any(x in title for x in ["data scientist","data science"])
+    if role_low == "qa":
+        return any(x in title for x in ["qa","test engineer","quality assurance"])
+
+    return role_low in title or role_low in desc
+
+
 def evidence(job: Job, p: Preferences) -> tuple[list[str], list[str], float]:
     text = job_text(job).lower()
     reasons: list[str] = []
@@ -64,15 +100,14 @@ def evidence(job: Job, p: Preferences) -> tuple[list[str], list[str], float]:
     bonus = 0.0
 
     for role in p.roles:
-        role_tokens = [t for t in tokens(role) if len(t) > 2]
-        if any(t in text for t in role_tokens):
+        if _role_fit(job, role):
             reasons.append(f"role aligns with {role}")
-            bonus += 0.10
+            bonus += 0.12
 
     if p.locations and job.location:
         if any(loc.lower() in job.location.lower() for loc in p.locations):
             reasons.append(f"location matches {job.location}")
-            bonus += 0.08
+            bonus += 0.10
 
     if p.remote_ok and job.remote_policy == "remote":
         reasons.append("remote option matches preference")
@@ -116,6 +151,5 @@ def rank_jobs(
         score = lexical_score(job, p, query) + bonus - 0.35 * len(violations)
         matches.append(Match(job=job, score=round(score,4), reasons=reasons, risks=risks, hard_violations=violations))
 
-    # hard constraints always lose to clean candidates.
     matches.sort(key=lambda m: (bool(m.hard_violations), -m.score, m.job.title.lower()))
     return matches[:top_k]
