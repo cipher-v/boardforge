@@ -18,10 +18,11 @@ SEARCH_CUES = re.compile(
     re.I,
 )
 PREFERENCE_CUES = re.compile(
-    r"\b(do not|don't|dont|avoid|only|from now on|minimum|at least|changed my mind|"
+    r"\b(do not|don't|dont|not|no|avoid|exclude|remove|stop showing|only|from now on|minimum|at least|changed my mind|"
     r"salary matters|okay with|lower priority|focus on|want internships|want remote|worldwide|onsite|hybrid)\b",
     re.I,
 )
+NEGATED_SHOW_CUES = re.compile(r"\b(do not|don't|dont|stop)\s+show(?:ing)?\b", re.I)
 FEEDBACK_CUES = re.compile(r"\b(reject|ignore|save|applied|interview|mark)\b", re.I)
 JOB_ID_CUE = re.compile(r"\b[\w-]+:[\w-]+:[\w-]+\b")
 
@@ -32,7 +33,10 @@ def deterministic_tool_plan(text: str) -> list[str]:
         tools.append("record_feedback")
     if PREFERENCE_CUES.search(text):
         tools.append("update_preferences")
-    if SEARCH_CUES.search(text):
+    search_requested = bool(SEARCH_CUES.search(text))
+    if NEGATED_SHOW_CUES.search(text):
+        search_requested = bool(re.search(r"\b(find|search|show me|openings?|alternatives?|similar)\b", text, re.I))
+    if search_requested:
         tools.append("search_jobs")
     if not tools:
         tools.append("search_jobs")
