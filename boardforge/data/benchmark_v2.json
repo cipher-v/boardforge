@@ -540,7 +540,8 @@
         "ai-rag-remote",
         "ai-ml-pune",
         "ai-low-salary",
-        "ai-high-salary"
+        "ai-high-salary",
+        "ai-unpaid-pune"
       ],
       "forbidden_ids": [
         "ai-us",
@@ -566,7 +567,8 @@
         "ai-rag-remote",
         "ai-ml-pune",
         "ai-low-salary",
-        "ai-high-salary"
+        "ai-high-salary",
+        "ai-unpaid-pune"
       ],
       "forbidden_ids": [
         "ai-us",
@@ -592,7 +594,8 @@
         "ai-rag-remote",
         "ai-ml-pune",
         "ai-low-salary",
-        "ai-high-salary"
+        "ai-high-salary",
+        "ai-unpaid-pune"
       ],
       "forbidden_ids": [
         "ai-us",
@@ -618,7 +621,8 @@
         "ai-rag-remote",
         "ai-ml-pune",
         "ai-low-salary",
-        "ai-high-salary"
+        "ai-high-salary",
+        "ai-unpaid-pune"
       ],
       "forbidden_ids": [
         "ai-us",
@@ -644,7 +648,8 @@
         "ai-rag-remote",
         "ai-ml-pune",
         "ai-low-salary",
-        "ai-high-salary"
+        "ai-high-salary",
+        "ai-unpaid-pune"
       ],
       "forbidden_ids": [
         "ai-us",
@@ -1178,7 +1183,8 @@
         "ai-rag-remote",
         "ai-ml-pune",
         "ai-low-salary",
-        "ai-high-salary"
+        "ai-high-salary",
+        "ai-unpaid-pune"
       ],
       "forbidden_ids": [
         "hardware-ai-blr"
@@ -1205,7 +1211,8 @@
         "ai-rag-remote",
         "ai-ml-pune",
         "ai-low-salary",
-        "ai-high-salary"
+        "ai-high-salary",
+        "ai-unpaid-pune"
       ],
       "forbidden_ids": [
         "hardware-ai-blr"
@@ -1232,7 +1239,8 @@
         "ai-rag-remote",
         "ai-ml-pune",
         "ai-low-salary",
-        "ai-high-salary"
+        "ai-high-salary",
+        "ai-unpaid-pune"
       ],
       "forbidden_ids": [
         "hardware-ai-blr"
@@ -1259,7 +1267,8 @@
         "ai-rag-remote",
         "ai-ml-pune",
         "ai-low-salary",
-        "ai-high-salary"
+        "ai-high-salary",
+        "ai-unpaid-pune"
       ],
       "forbidden_ids": [
         "hardware-ai-blr"
@@ -1286,7 +1295,8 @@
         "ai-rag-remote",
         "ai-ml-pune",
         "ai-low-salary",
-        "ai-high-salary"
+        "ai-high-salary",
+        "ai-unpaid-pune"
       ],
       "forbidden_ids": [
         "hardware-ai-blr"
@@ -1308,7 +1318,8 @@
       "relevant_ids": [
         "ai-rag-remote",
         "ai-ml-pune",
-        "ai-high-salary"
+        "ai-high-salary",
+        "ai-unpaid-pune"
       ],
       "forbidden_ids": [
         "ai-llm-blr"
@@ -1333,7 +1344,8 @@
       "relevant_ids": [
         "ai-rag-remote",
         "ai-ml-pune",
-        "ai-high-salary"
+        "ai-high-salary",
+        "ai-unpaid-pune"
       ],
       "forbidden_ids": [
         "ai-llm-blr"
@@ -1358,7 +1370,8 @@
       "relevant_ids": [
         "ai-rag-remote",
         "ai-ml-pune",
-        "ai-high-salary"
+        "ai-high-salary",
+        "ai-unpaid-pune"
       ],
       "forbidden_ids": [
         "ai-llm-blr"
@@ -1383,7 +1396,8 @@
       "relevant_ids": [
         "ai-rag-remote",
         "ai-ml-pune",
-        "ai-high-salary"
+        "ai-high-salary",
+        "ai-unpaid-pune"
       ],
       "forbidden_ids": [
         "ai-llm-blr"
@@ -1408,7 +1422,8 @@
       "relevant_ids": [
         "ai-rag-remote",
         "ai-ml-pune",
-        "ai-high-salary"
+        "ai-high-salary",
+        "ai-unpaid-pune"
       ],
       "forbidden_ids": [
         "ai-llm-blr"
@@ -1435,7 +1450,8 @@
         "ai-ml-pune",
         "ai-high-salary",
         "ai-low-salary",
-        "ai-senior-blr"
+        "ai-senior-blr",
+        "ai-unpaid-pune"
       ],
       "forbidden_ids": [
         "ai-unknown-country",
@@ -1460,7 +1476,8 @@
         "ai-ml-pune",
         "ai-high-salary",
         "ai-low-salary",
-        "ai-senior-blr"
+        "ai-senior-blr",
+        "ai-unpaid-pune"
       ],
       "forbidden_ids": [
         "ai-unknown-country",
@@ -1485,7 +1502,8 @@
         "ai-ml-pune",
         "ai-high-salary",
         "ai-low-salary",
-        "ai-senior-blr"
+        "ai-senior-blr",
+        "ai-unpaid-pune"
       ],
       "forbidden_ids": [
         "ai-unknown-country",
@@ -1510,7 +1528,8 @@
         "ai-ml-pune",
         "ai-high-salary",
         "ai-low-salary",
-        "ai-senior-blr"
+        "ai-senior-blr",
+        "ai-unpaid-pune"
       ],
       "forbidden_ids": [
         "ai-unknown-country",
@@ -1535,7 +1554,8 @@
         "ai-ml-pune",
         "ai-high-salary",
         "ai-low-salary",
-        "ai-senior-blr"
+        "ai-senior-blr",
+        "ai-unpaid-pune"
       ],
       "forbidden_ids": [
         "ai-unknown-country",
@@ -3200,7 +3220,8 @@
         "backend-pune",
         "platform-blr",
         "backend-remote",
-        "fullstack-pune"
+        "fullstack-pune",
+        "ai-unpaid-pune"
       ],
       "forbidden_ids": [
         "designer-blr",
@@ -3231,7 +3252,8 @@
         "backend-pune",
         "platform-blr",
         "backend-remote",
-        "fullstack-pune"
+        "fullstack-pune",
+        "ai-unpaid-pune"
       ],
       "forbidden_ids": [
         "designer-blr",
@@ -3262,7 +3284,8 @@
         "backend-pune",
         "platform-blr",
         "backend-remote",
-        "fullstack-pune"
+        "fullstack-pune",
+        "ai-unpaid-pune"
       ],
       "forbidden_ids": [
         "designer-blr",
@@ -3293,7 +3316,8 @@
         "backend-pune",
         "platform-blr",
         "backend-remote",
-        "fullstack-pune"
+        "fullstack-pune",
+        "ai-unpaid-pune"
       ],
       "forbidden_ids": [
         "designer-blr",
@@ -3324,7 +3348,8 @@
         "backend-pune",
         "platform-blr",
         "backend-remote",
-        "fullstack-pune"
+        "fullstack-pune",
+        "ai-unpaid-pune"
       ],
       "forbidden_ids": [
         "designer-blr",
