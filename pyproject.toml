@@ -1,0 +1,18 @@
+[project]
+name = "boardforge"
+version = "0.2.0"
+description = "Self-learning job intelligence infrastructure with ATS connectors, temporal indexing, personalization and evals."
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "uvicorn[standard]>=0.34,<1",
+  "httpx>=0.28,<1",
+  "pydantic>=2.10,<3",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3,<9", "pytest-cov>=6,<7"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
