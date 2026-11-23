@@ -193,7 +193,7 @@ def comparison_markdown(report: dict[str, Any]) -> str:
         "",
         f"Dataset: v{report['dataset_version']} — {report['cases']} cases / {report['jobs']} jobs",
         "",
-        "| Variant | P@5 | Recall@5 | NDCG@5 | Forbidden | Top-1 | Empty |",
+        f"| Variant | P@{report['top_k']} | Recall@{report['top_k']} | NDCG@{report['top_k']} | Forbidden | Top-1 | Empty |",
         "|---|---:|---:|---:|---:|---:|---:|",
     ]
     for name, data in report["variants"].items():
