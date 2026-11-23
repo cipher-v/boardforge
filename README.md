@@ -180,7 +180,7 @@ This lets the system answer a more useful question than “what jobs exist?”:
 
 ## Evaluation
 
-Run `python -m boardforge.cli benchmark` for per-case predictions, Precision@K, Recall@K, NDCG@K and forbidden-result rate. The bundled six-case fixture is deliberately small and exists as a reproducible regression baseline, not as a claim of production quality.
+Run `python -m boardforge.cli benchmark` for the 120-case adversarial ranking suite. Run `python -m boardforge.cli compare --markdown-out results/ranking.md` for lexical → constrained → evidence → feedback ablations, and `python -m boardforge.cli agent-eval` for the 40-case tool-selection suite. These datasets are synthetic regression/evaluation fixtures, not claims of real-user product quality.
 
 See [docs/evaluation.md](docs/evaluation.md).
 
@@ -198,7 +198,7 @@ See [docs/evaluation.md](docs/evaluation.md).
 Planned production milestones:
 
 1. persistent hybrid full-text/vector retrieval
-2. a larger labeled ranking and agent-tool benchmark
+2. real-user labels to complement the packaged 120-case ranking and 40-case agent-tool benchmarks
 3. scheduled source synchronization and operational telemetry
 4. automatic validation of learned manifests against browser-visible counts
 
