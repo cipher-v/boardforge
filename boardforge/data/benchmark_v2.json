@@ -1,0 +1,3436 @@
+{
+  "version": "2.0",
+  "description": "120-case adversarial ranking benchmark: 24 failure families x 5 paraphrases. Synthetic, deterministic, versioned regression/evaluation data; not production-user evidence.",
+  "jobs": [
+    {
+      "source_kind": "benchmark",
+      "source_key": "v2",
+      "remote_policy": "unknown",
+      "employment_type": "full_time",
+      "description": "Build Python agents, retrieval, ranking and evaluation systems.",
+      "company": "Reason Labs",
+      "location": "Bengaluru, India",
+      "country": "India",
+      "salary_text": "",
+      "tags": [
+        "python",
+        "llm",
+        "retrieval"
+      ],
+      "external_id": "ai-llm-blr",
+      "title": "LLM Engineer",
+      "salary_currency": "INR",
+      "salary_min": 1600000,
+      "salary_period": "year",
+      "min_experience_years": 1
+    },
+    {
+      "source_kind": "benchmark",
+      "source_key": "v2",
+      "remote_policy": "remote",
+      "employment_type": "full_time",
+      "description": "Own embeddings, semantic search and LLM evaluation.",
+      "company": "Search AI",
+      "location": "India Remote",
+      "country": "India",
+      "salary_text": "",
+      "tags": [
+        "rag",
+        "embeddings",
+        "llm"
+      ],
+      "external_id": "ai-rag-remote",
+      "title": "RAG Engineer",
+      "salary_currency": "INR",
+      "salary_min": 1400000,
+      "salary_period": "year",
+      "min_experience_years": 1
+    },
+    {
+      "source_kind": "benchmark",
+      "source_key": "v2",
+      "remote_policy": "unknown",
+      "employment_type": "full_time",
+      "description": "Python model training and inference services.",
+      "company": "Model Works",
+      "location": "Pune, India",
+      "country": "India",
+      "salary_text": "",
+      "tags": [
+        "python",
+        "machine learning"
+      ],
+      "external_id": "ai-ml-pune",
+      "title": "Machine Learning Engineer",
+      "salary_currency": "INR",
+      "salary_min": 1100000,
+      "salary_period": "year",
+      "min_experience_years": 1
+    },
+    {
+      "source_kind": "benchmark",
+      "source_key": "v2",
+      "remote_policy": "unknown",
+      "employment_type": "full_time",
+      "description": "Machine learning platform and agents.",
+      "company": "US AI",
+      "location": "San Mateo, CA",
+      "country": "USA",
+      "salary_text": "",
+      "tags": [
+        "ai",
+        "llm"
+      ],
+      "external_id": "ai-us",
+      "title": "AI Engineer",
+      "salary_currency": "USD",
+      "salary_min": 140000,
+      "salary_period": "year",
+      "min_experience_years": 1
+    },
+    {
+      "source_kind": "benchmark",
+      "source_key": "v2",
+      "remote_policy": "unknown",
+      "employment_type": "full_time",
+      "description": "Lead model infrastructure and training systems.",
+      "company": "Scale Models",
+      "location": "Bengaluru, India",
+      "country": "India",
+      "salary_text": "",
+      "tags": [
+        "machine learning"
+      ],
+      "external_id": "ai-senior-blr",
+      "title": "Senior ML Engineer",
+      "salary_currency": "INR",
+      "salary_min": 3200000,
+      "salary_period": "year",
+      "min_experience_years": 5
+    },
+    {
+      "source_kind": "benchmark",
+      "source_key": "v2",
+      "remote_policy": "unknown",
+      "employment_type": "internship",
+      "description": "Unpaid machine learning internship. No stipend.",
+      "company": "Tiny ML",
+      "location": "Pune, India",
+      "country": "India",
+      "salary_text": "",
+      "tags": [
+        "machine learning"
+      ],
+      "external_id": "ai-unpaid-pune",
+      "title": "ML Engineer Intern",
+      "min_experience_years": 0
+    },
+    {
+      "source_kind": "benchmark",
+      "source_key": "v2",
+      "remote_policy": "unknown",
+      "employment_type": "full_time",
+      "description": "Build Python AI services.",
+      "company": "Budget AI",
+      "location": "Bengaluru, India",
+      "country": "India",
+      "salary_text": "",
+      "tags": [
+        "python",
+        "ai"
+      ],
+      "external_id": "ai-low-salary",
+      "title": "AI Engineer",
+      "salary_currency": "INR",
+      "salary_min": 600000,
+      "salary_period": "year",
+      "min_experience_years": 0
+    },
+    {
+      "source_kind": "benchmark",
+      "source_key": "v2",
+      "remote_policy": "unknown",
+      "employment_type": "full_time",
+      "description": "Applied LLM systems and evaluation.",
+      "company": "Applied Labs",
+      "location": "Bengaluru, India",
+      "country": "India",
+      "salary_text": "",
+      "tags": [
+        "llm",
+        "evaluation"
+      ],
+      "external_id": "ai-high-salary",
+      "title": "Applied AI Engineer",
+      "salary_currency": "INR",
+      "salary_min": 2000000,
+      "salary_period": "year",
+      "min_experience_years": 1
+    },
+    {
+      "source_kind": "benchmark",
+      "source_key": "v2",
+      "remote_policy": "unknown",
+      "employment_type": "full_time",
+      "description": "Python retrieval and agent systems.",
+      "company": "Unknown Co",
+      "location": "",
+      "country": "",
+      "salary_text": "",
+      "tags": [
+        "llm",
+        "retrieval"
+      ],
+      "external_id": "ai-unknown-country",
+      "title": "LLM Engineer",
+      "min_experience_years": 1
+    },
+    {
+      "source_kind": "benchmark",
+      "source_key": "v2",
+      "remote_policy": "unknown",
+      "employment_type": "full_time",
+      "description": "PyTorch detection, segmentation and tracking.",
+      "company": "Perception AI",
+      "location": "Bengaluru, India",
+      "country": "India",
+      "salary_text": "",
+      "tags": [
+        "python",
+        "computer vision",
+        "pytorch"
+      ],
+      "external_id": "cv-blr",
+      "title": "Computer Vision Engineer",
+      "salary_currency": "INR",
+      "salary_min": 1500000,
+      "salary_period": "year",
+      "min_experience_years": 1
+    },
+    {
+      "source_kind": "benchmark",
+      "source_key": "v2",
+      "remote_policy": "unknown",
+      "employment_type": "full_time",
+      "description": "Vision perception, tracking and 3D geometry.",
+      "company": "Vision Motion",
+      "location": "Pune, India",
+      "country": "India",
+      "salary_text": "",
+      "tags": [
+        "computer vision"
+      ],
+      "external_id": "cv-pune",
+      "title": "Perception Engineer",
+      "salary_currency": "INR",
+      "salary_min": 1300000,
+      "salary_period": "year",
+      "min_experience_years": 1
+    },
+    {
+      "source_kind": "benchmark",
+      "source_key": "v2",
+      "remote_policy": "unknown",
+      "employment_type": "full_time",
+      "description": "Lead perception systems.",
+      "company": "Deep Sight",
+      "location": "Bengaluru, India",
+      "country": "India",
+      "salary_text": "",
+      "tags": [
+        "computer vision"
+      ],
+      "external_id": "cv-senior",
+      "title": "Senior Computer Vision Engineer",
+      "salary_currency": "INR",
+      "salary_min": 2800000,
+      "salary_period": "year",
+      "min_experience_years": 5
+    },
+    {
+      "source_kind": "benchmark",
+      "source_key": "v2",
+      "remote_policy": "unknown",
+      "employment_type": "full_time",
+      "description": "Python APIs, PostgreSQL and distributed services.",
+      "company": "Cloud Works",
+      "location": "Pune, India",
+      "country": "India",
+      "salary_text": "",
+      "tags": [
+        "python",
+        "sql",
+        "backend"
+      ],
+      "external_id": "backend-pune",
+      "title": "Backend Engineer",
+      "salary_currency": "INR",
+      "salary_min": 1000000,
+      "salary_period": "year",
+      "min_experience_years": 1
+    },
+    {
+      "source_kind": "benchmark",
+      "source_key": "v2",
+      "remote_policy": "unknown",
+      "employment_type": "full_time",
+      "description": "Kubernetes, APIs and distributed infrastructure.",
+      "company": "Infra Co",
+      "location": "Bengaluru, India",
+      "country": "India",
+      "salary_text": "",
+      "tags": [
+        "kubernetes",
+        "backend"
+      ],
+      "external_id": "platform-blr",
+      "title": "Platform Engineer",
+      "salary_currency": "INR",
+      "salary_min": 1800000,
+      "salary_period": "year",
+      "min_experience_years": 2
+    },
+    {
+      "source_kind": "benchmark",
+      "source_key": "v2",
+      "remote_policy": "remote",
+      "employment_type": "full_time",
+      "description": "Python APIs and PostgreSQL.",
+      "company": "Remote Stack",
+      "location": "India Remote",
+      "country": "India",
+      "salary_text": "",
+      "tags": [
+        "python",
+        "backend"
+      ],
+      "external_id": "backend-remote",
+      "title": "Back-end Engineer",
+      "salary_currency": "INR",
+      "salary_min": 1200000,
+      "salary_period": "year",
+      "min_experience_years": 1
+    },
+    {
+      "source_kind": "benchmark",
+      "source_key": "v2",
+      "remote_policy": "unknown",
+      "employment_type": "full_time",
+      "description": "Distributed APIs.",
+      "company": "US Cloud",
+      "location": "Austin, TX",
+      "country": "USA",
+      "salary_text": "",
+      "tags": [
+        "backend"
+      ],
+      "external_id": "backend-us",
+      "title": "Backend Engineer",
+      "min_experience_years": 1
+    },
+    {
+      "source_kind": "benchmark",
+      "source_key": "v2",
+      "remote_policy": "unknown",
+      "employment_type": "full_time",
+      "description": "Build production services and APIs.",
+      "company": "Product Co",
+      "location": "Bengaluru, India",
+      "country": "India",
+      "salary_text": "",
+      "tags": [
+        "software"
+      ],
+      "external_id": "swe-blr",
+      "title": "Software Engineer",
+      "salary_currency": "INR",
+      "salary_min": 1200000,
+      "salary_period": "year",
+      "min_experience_years": 1
+    },
+    {
+      "source_kind": "benchmark",
+      "source_key": "v2",
+      "remote_policy": "unknown",
+      "employment_type": "full_time",
+      "description": "React and Node APIs.",
+      "company": "Web Co",
+      "location": "Pune, India",
+      "country": "India",
+      "salary_text": "",
+      "tags": [
+        "full-stack"
+      ],
+      "external_id": "fullstack-pune",
+      "title": "Full-Stack Developer",
+      "salary_currency": "INR",
+      "salary_min": 900000,
+      "salary_period": "year",
+      "min_experience_years": 1
+    },
+    {
+      "source_kind": "benchmark",
+      "source_key": "v2",
+      "remote_policy": "unknown",
+      "employment_type": "full_time",
+      "description": "Manual testing and API regression.",
+      "company": "Test Co",
+      "location": "Bengaluru, India",
+      "country": "India",
+      "salary_text": "",
+      "tags": [
+        "qa"
+      ],
+      "external_id": "qa-blr",
+      "title": "QA Engineer",
+      "salary_currency": "INR",
+      "salary_min": 800000,
+      "salary_period": "year",
+      "min_experience_years": 0
+    },
+    {
+      "source_kind": "benchmark",
+      "source_key": "v2",
+      "remote_policy": "unknown",
+      "employment_type": "full_time",
+      "description": "Python test automation and API testing.",
+      "company": "Quality Systems",
+      "location": "Pune, India",
+      "country": "India",
+      "salary_text": "",
+      "tags": [
+        "qa",
+        "python"
+      ],
+      "external_id": "sdet-pune",
+      "title": "SDET",
+      "salary_currency": "INR",
+      "salary_min": 1000000,
+      "salary_period": "year",
+      "min_experience_years": 1
+    },
+    {
+      "source_kind": "benchmark",
+      "source_key": "v2",
+      "remote_policy": "unknown",
+      "employment_type": "full_time",
+      "description": "Python SQL ETL and data quality.",
+      "company": "Metric Flow",
+      "location": "Hyderabad, India",
+      "country": "India",
+      "salary_text": "",
+      "tags": [
+        "python",
+        "sql"
+      ],
+      "external_id": "data-eng-hyd",
+      "title": "Data Engineer",
+      "salary_currency": "INR",
+      "salary_min": 1100000,
+      "salary_period": "year",
+      "min_experience_years": 1
+    },
+    {
+      "source_kind": "benchmark",
+      "source_key": "v2",
+      "remote_policy": "unknown",
+      "employment_type": "full_time",
+      "description": "Statistical modeling and Python.",
+      "company": "Insight AI",
+      "location": "Bengaluru, India",
+      "country": "India",
+      "salary_text": "",
+      "tags": [
+        "python",
+        "data science"
+      ],
+      "external_id": "data-science-blr",
+      "title": "Data Scientist",
+      "salary_currency": "INR",
+      "salary_min": 1300000,
+      "salary_period": "year",
+      "min_experience_years": 1
+    },
+    {
+      "source_kind": "benchmark",
+      "source_key": "v2",
+      "remote_policy": "unknown",
+      "employment_type": "full_time",
+      "description": "Product design and user research.",
+      "company": "Design Co",
+      "location": "Bengaluru, India",
+      "country": "India",
+      "salary_text": "",
+      "tags": [],
+      "external_id": "designer-blr",
+      "title": "UI/UX Designer"
+    },
+    {
+      "source_kind": "benchmark",
+      "source_key": "v2",
+      "remote_policy": "unknown",
+      "employment_type": "full_time",
+      "description": "Customer demos and enterprise sales.",
+      "company": "Revenue Co",
+      "location": "Bengaluru, India",
+      "country": "India",
+      "salary_text": "",
+      "tags": [],
+      "external_id": "sales-blr",
+      "title": "Sales Engineer"
+    },
+    {
+      "source_kind": "benchmark",
+      "source_key": "v2",
+      "remote_policy": "unknown",
+      "employment_type": "full_time",
+      "description": "Firmware, C and microcontrollers.",
+      "company": "Device Co",
+      "location": "Bengaluru, India",
+      "country": "India",
+      "salary_text": "",
+      "tags": [
+        "embedded"
+      ],
+      "external_id": "embedded-blr",
+      "title": "Embedded Software Engineer",
+      "salary_currency": "INR",
+      "salary_min": 1200000,
+      "salary_period": "year",
+      "min_experience_years": 1
+    },
+    {
+      "source_kind": "benchmark",
+      "source_key": "v2",
+      "remote_policy": "unknown",
+      "employment_type": "full_time",
+      "description": "Accelerator hardware and embedded AI.",
+      "company": "Chip AI",
+      "location": "Bengaluru, India",
+      "country": "India",
+      "salary_text": "",
+      "tags": [
+        "hardware",
+        "ai"
+      ],
+      "external_id": "hardware-ai-blr",
+      "title": "AI Hardware Engineer",
+      "salary_currency": "INR",
+      "salary_min": 1800000,
+      "salary_period": "year",
+      "min_experience_years": 1
+    }
+  ],
+  "cases": [
+    {
+      "name": "ai_india_junior__p1",
+      "family": "ai_india_junior",
+      "query": "Python AI roles",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "ai-llm-blr",
+        "ai-rag-remote",
+        "ai-ml-pune",
+        "ai-low-salary",
+        "ai-high-salary"
+      ],
+      "forbidden_ids": [
+        "ai-us",
+        "ai-senior-blr",
+        "designer-blr"
+      ]
+    },
+    {
+      "name": "ai_india_junior__p2",
+      "family": "ai_india_junior",
+      "query": "LLM engineering jobs",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "ai-llm-blr",
+        "ai-rag-remote",
+        "ai-ml-pune",
+        "ai-low-salary",
+        "ai-high-salary"
+      ],
+      "forbidden_ids": [
+        "ai-us",
+        "ai-senior-blr",
+        "designer-blr"
+      ]
+    },
+    {
+      "name": "ai_india_junior__p3",
+      "family": "ai_india_junior",
+      "query": "machine learning engineer work",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "ai-llm-blr",
+        "ai-rag-remote",
+        "ai-ml-pune",
+        "ai-low-salary",
+        "ai-high-salary"
+      ],
+      "forbidden_ids": [
+        "ai-us",
+        "ai-senior-blr",
+        "designer-blr"
+      ]
+    },
+    {
+      "name": "ai_india_junior__p4",
+      "family": "ai_india_junior",
+      "query": "applied AI opportunities",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "ai-llm-blr",
+        "ai-rag-remote",
+        "ai-ml-pune",
+        "ai-low-salary",
+        "ai-high-salary"
+      ],
+      "forbidden_ids": [
+        "ai-us",
+        "ai-senior-blr",
+        "designer-blr"
+      ]
+    },
+    {
+      "name": "ai_india_junior__p5",
+      "family": "ai_india_junior",
+      "query": "AI/ML jobs",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "ai-llm-blr",
+        "ai-rag-remote",
+        "ai-ml-pune",
+        "ai-low-salary",
+        "ai-high-salary"
+      ],
+      "forbidden_ids": [
+        "ai-us",
+        "ai-senior-blr",
+        "designer-blr"
+      ]
+    },
+    {
+      "name": "ai_bengaluru__p1",
+      "family": "ai_bengaluru",
+      "query": "Python AI roles",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "locations": [
+          "Bengaluru"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "ai-llm-blr",
+        "ai-low-salary",
+        "ai-high-salary"
+      ],
+      "forbidden_ids": [
+        "ai-us",
+        "ai-ml-pune",
+        "ai-rag-remote"
+      ]
+    },
+    {
+      "name": "ai_bengaluru__p2",
+      "family": "ai_bengaluru",
+      "query": "LLM engineering jobs",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "locations": [
+          "Bengaluru"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "ai-llm-blr",
+        "ai-low-salary",
+        "ai-high-salary"
+      ],
+      "forbidden_ids": [
+        "ai-us",
+        "ai-ml-pune",
+        "ai-rag-remote"
+      ]
+    },
+    {
+      "name": "ai_bengaluru__p3",
+      "family": "ai_bengaluru",
+      "query": "machine learning engineer work",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "locations": [
+          "Bengaluru"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "ai-llm-blr",
+        "ai-low-salary",
+        "ai-high-salary"
+      ],
+      "forbidden_ids": [
+        "ai-us",
+        "ai-ml-pune",
+        "ai-rag-remote"
+      ]
+    },
+    {
+      "name": "ai_bengaluru__p4",
+      "family": "ai_bengaluru",
+      "query": "applied AI opportunities",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "locations": [
+          "Bengaluru"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "ai-llm-blr",
+        "ai-low-salary",
+        "ai-high-salary"
+      ],
+      "forbidden_ids": [
+        "ai-us",
+        "ai-ml-pune",
+        "ai-rag-remote"
+      ]
+    },
+    {
+      "name": "ai_bengaluru__p5",
+      "family": "ai_bengaluru",
+      "query": "AI/ML jobs",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "locations": [
+          "Bengaluru"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "ai-llm-blr",
+        "ai-low-salary",
+        "ai-high-salary"
+      ],
+      "forbidden_ids": [
+        "ai-us",
+        "ai-ml-pune",
+        "ai-rag-remote"
+      ]
+    },
+    {
+      "name": "ai_remote_only__p1",
+      "family": "ai_remote_only",
+      "query": "Python AI roles",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "countries": [
+          "India"
+        ],
+        "remote_ok": true,
+        "onsite_ok": false
+      },
+      "relevant_ids": [
+        "ai-rag-remote"
+      ],
+      "forbidden_ids": [
+        "ai-llm-blr",
+        "ai-us"
+      ]
+    },
+    {
+      "name": "ai_remote_only__p2",
+      "family": "ai_remote_only",
+      "query": "LLM engineering jobs",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "countries": [
+          "India"
+        ],
+        "remote_ok": true,
+        "onsite_ok": false
+      },
+      "relevant_ids": [
+        "ai-rag-remote"
+      ],
+      "forbidden_ids": [
+        "ai-llm-blr",
+        "ai-us"
+      ]
+    },
+    {
+      "name": "ai_remote_only__p3",
+      "family": "ai_remote_only",
+      "query": "machine learning engineer work",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "countries": [
+          "India"
+        ],
+        "remote_ok": true,
+        "onsite_ok": false
+      },
+      "relevant_ids": [
+        "ai-rag-remote"
+      ],
+      "forbidden_ids": [
+        "ai-llm-blr",
+        "ai-us"
+      ]
+    },
+    {
+      "name": "ai_remote_only__p4",
+      "family": "ai_remote_only",
+      "query": "applied AI opportunities",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "countries": [
+          "India"
+        ],
+        "remote_ok": true,
+        "onsite_ok": false
+      },
+      "relevant_ids": [
+        "ai-rag-remote"
+      ],
+      "forbidden_ids": [
+        "ai-llm-blr",
+        "ai-us"
+      ]
+    },
+    {
+      "name": "ai_remote_only__p5",
+      "family": "ai_remote_only",
+      "query": "AI/ML jobs",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "countries": [
+          "India"
+        ],
+        "remote_ok": true,
+        "onsite_ok": false
+      },
+      "relevant_ids": [
+        "ai-rag-remote"
+      ],
+      "forbidden_ids": [
+        "ai-llm-blr",
+        "ai-us"
+      ]
+    },
+    {
+      "name": "ai_paid_only__p1",
+      "family": "ai_paid_only",
+      "query": "Python AI roles",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "countries": [
+          "India"
+        ],
+        "paid_only": true,
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "ai-llm-blr",
+        "ai-rag-remote",
+        "ai-ml-pune",
+        "ai-low-salary",
+        "ai-high-salary"
+      ],
+      "forbidden_ids": [
+        "ai-unpaid-pune",
+        "ai-us"
+      ]
+    },
+    {
+      "name": "ai_paid_only__p2",
+      "family": "ai_paid_only",
+      "query": "LLM engineering jobs",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "countries": [
+          "India"
+        ],
+        "paid_only": true,
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "ai-llm-blr",
+        "ai-rag-remote",
+        "ai-ml-pune",
+        "ai-low-salary",
+        "ai-high-salary"
+      ],
+      "forbidden_ids": [
+        "ai-unpaid-pune",
+        "ai-us"
+      ]
+    },
+    {
+      "name": "ai_paid_only__p3",
+      "family": "ai_paid_only",
+      "query": "machine learning engineer work",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "countries": [
+          "India"
+        ],
+        "paid_only": true,
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "ai-llm-blr",
+        "ai-rag-remote",
+        "ai-ml-pune",
+        "ai-low-salary",
+        "ai-high-salary"
+      ],
+      "forbidden_ids": [
+        "ai-unpaid-pune",
+        "ai-us"
+      ]
+    },
+    {
+      "name": "ai_paid_only__p4",
+      "family": "ai_paid_only",
+      "query": "applied AI opportunities",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "countries": [
+          "India"
+        ],
+        "paid_only": true,
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "ai-llm-blr",
+        "ai-rag-remote",
+        "ai-ml-pune",
+        "ai-low-salary",
+        "ai-high-salary"
+      ],
+      "forbidden_ids": [
+        "ai-unpaid-pune",
+        "ai-us"
+      ]
+    },
+    {
+      "name": "ai_paid_only__p5",
+      "family": "ai_paid_only",
+      "query": "AI/ML jobs",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "countries": [
+          "India"
+        ],
+        "paid_only": true,
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "ai-llm-blr",
+        "ai-rag-remote",
+        "ai-ml-pune",
+        "ai-low-salary",
+        "ai-high-salary"
+      ],
+      "forbidden_ids": [
+        "ai-unpaid-pune",
+        "ai-us"
+      ]
+    },
+    {
+      "name": "ai_salary_12__p1",
+      "family": "ai_salary_12",
+      "query": "Python AI roles",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "countries": [
+          "India"
+        ],
+        "min_salary_lpa": 12,
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "ai-llm-blr",
+        "ai-rag-remote",
+        "ai-high-salary"
+      ],
+      "forbidden_ids": [
+        "ai-low-salary",
+        "ai-us"
+      ]
+    },
+    {
+      "name": "ai_salary_12__p2",
+      "family": "ai_salary_12",
+      "query": "LLM engineering jobs",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "countries": [
+          "India"
+        ],
+        "min_salary_lpa": 12,
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "ai-llm-blr",
+        "ai-rag-remote",
+        "ai-high-salary"
+      ],
+      "forbidden_ids": [
+        "ai-low-salary",
+        "ai-us"
+      ]
+    },
+    {
+      "name": "ai_salary_12__p3",
+      "family": "ai_salary_12",
+      "query": "machine learning engineer work",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "countries": [
+          "India"
+        ],
+        "min_salary_lpa": 12,
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "ai-llm-blr",
+        "ai-rag-remote",
+        "ai-high-salary"
+      ],
+      "forbidden_ids": [
+        "ai-low-salary",
+        "ai-us"
+      ]
+    },
+    {
+      "name": "ai_salary_12__p4",
+      "family": "ai_salary_12",
+      "query": "applied AI opportunities",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "countries": [
+          "India"
+        ],
+        "min_salary_lpa": 12,
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "ai-llm-blr",
+        "ai-rag-remote",
+        "ai-high-salary"
+      ],
+      "forbidden_ids": [
+        "ai-low-salary",
+        "ai-us"
+      ]
+    },
+    {
+      "name": "ai_salary_12__p5",
+      "family": "ai_salary_12",
+      "query": "AI/ML jobs",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "countries": [
+          "India"
+        ],
+        "min_salary_lpa": 12,
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "ai-llm-blr",
+        "ai-rag-remote",
+        "ai-high-salary"
+      ],
+      "forbidden_ids": [
+        "ai-low-salary",
+        "ai-us"
+      ]
+    },
+    {
+      "name": "ai_avoid_hardware__p1",
+      "family": "ai_avoid_hardware",
+      "query": "Python AI roles",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "countries": [
+          "India"
+        ],
+        "avoid_terms": [
+          "hardware"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "ai-llm-blr",
+        "ai-rag-remote",
+        "ai-ml-pune",
+        "ai-low-salary",
+        "ai-high-salary"
+      ],
+      "forbidden_ids": [
+        "hardware-ai-blr"
+      ]
+    },
+    {
+      "name": "ai_avoid_hardware__p2",
+      "family": "ai_avoid_hardware",
+      "query": "LLM engineering jobs",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "countries": [
+          "India"
+        ],
+        "avoid_terms": [
+          "hardware"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "ai-llm-blr",
+        "ai-rag-remote",
+        "ai-ml-pune",
+        "ai-low-salary",
+        "ai-high-salary"
+      ],
+      "forbidden_ids": [
+        "hardware-ai-blr"
+      ]
+    },
+    {
+      "name": "ai_avoid_hardware__p3",
+      "family": "ai_avoid_hardware",
+      "query": "machine learning engineer work",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "countries": [
+          "India"
+        ],
+        "avoid_terms": [
+          "hardware"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "ai-llm-blr",
+        "ai-rag-remote",
+        "ai-ml-pune",
+        "ai-low-salary",
+        "ai-high-salary"
+      ],
+      "forbidden_ids": [
+        "hardware-ai-blr"
+      ]
+    },
+    {
+      "name": "ai_avoid_hardware__p4",
+      "family": "ai_avoid_hardware",
+      "query": "applied AI opportunities",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "countries": [
+          "India"
+        ],
+        "avoid_terms": [
+          "hardware"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "ai-llm-blr",
+        "ai-rag-remote",
+        "ai-ml-pune",
+        "ai-low-salary",
+        "ai-high-salary"
+      ],
+      "forbidden_ids": [
+        "hardware-ai-blr"
+      ]
+    },
+    {
+      "name": "ai_avoid_hardware__p5",
+      "family": "ai_avoid_hardware",
+      "query": "AI/ML jobs",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "countries": [
+          "India"
+        ],
+        "avoid_terms": [
+          "hardware"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "ai-llm-blr",
+        "ai-rag-remote",
+        "ai-ml-pune",
+        "ai-low-salary",
+        "ai-high-salary"
+      ],
+      "forbidden_ids": [
+        "hardware-ai-blr"
+      ]
+    },
+    {
+      "name": "ai_reject_first__p1",
+      "family": "ai_reject_first",
+      "query": "Python AI roles",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "ai-rag-remote",
+        "ai-ml-pune",
+        "ai-high-salary"
+      ],
+      "forbidden_ids": [
+        "ai-llm-blr"
+      ],
+      "rejected_ids": [
+        "benchmark:v2:ai-llm-blr"
+      ]
+    },
+    {
+      "name": "ai_reject_first__p2",
+      "family": "ai_reject_first",
+      "query": "LLM engineering jobs",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "ai-rag-remote",
+        "ai-ml-pune",
+        "ai-high-salary"
+      ],
+      "forbidden_ids": [
+        "ai-llm-blr"
+      ],
+      "rejected_ids": [
+        "benchmark:v2:ai-llm-blr"
+      ]
+    },
+    {
+      "name": "ai_reject_first__p3",
+      "family": "ai_reject_first",
+      "query": "machine learning engineer work",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "ai-rag-remote",
+        "ai-ml-pune",
+        "ai-high-salary"
+      ],
+      "forbidden_ids": [
+        "ai-llm-blr"
+      ],
+      "rejected_ids": [
+        "benchmark:v2:ai-llm-blr"
+      ]
+    },
+    {
+      "name": "ai_reject_first__p4",
+      "family": "ai_reject_first",
+      "query": "applied AI opportunities",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "ai-rag-remote",
+        "ai-ml-pune",
+        "ai-high-salary"
+      ],
+      "forbidden_ids": [
+        "ai-llm-blr"
+      ],
+      "rejected_ids": [
+        "benchmark:v2:ai-llm-blr"
+      ]
+    },
+    {
+      "name": "ai_reject_first__p5",
+      "family": "ai_reject_first",
+      "query": "AI/ML jobs",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "ai-rag-remote",
+        "ai-ml-pune",
+        "ai-high-salary"
+      ],
+      "forbidden_ids": [
+        "ai-llm-blr"
+      ],
+      "rejected_ids": [
+        "benchmark:v2:ai-llm-blr"
+      ]
+    },
+    {
+      "name": "ai_unknown_geo__p1",
+      "family": "ai_unknown_geo",
+      "query": "Python AI roles",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "countries": [
+          "India"
+        ]
+      },
+      "relevant_ids": [
+        "ai-llm-blr",
+        "ai-rag-remote",
+        "ai-ml-pune",
+        "ai-high-salary",
+        "ai-low-salary",
+        "ai-senior-blr"
+      ],
+      "forbidden_ids": [
+        "ai-unknown-country",
+        "ai-us"
+      ]
+    },
+    {
+      "name": "ai_unknown_geo__p2",
+      "family": "ai_unknown_geo",
+      "query": "LLM engineering jobs",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "countries": [
+          "India"
+        ]
+      },
+      "relevant_ids": [
+        "ai-llm-blr",
+        "ai-rag-remote",
+        "ai-ml-pune",
+        "ai-high-salary",
+        "ai-low-salary",
+        "ai-senior-blr"
+      ],
+      "forbidden_ids": [
+        "ai-unknown-country",
+        "ai-us"
+      ]
+    },
+    {
+      "name": "ai_unknown_geo__p3",
+      "family": "ai_unknown_geo",
+      "query": "machine learning engineer work",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "countries": [
+          "India"
+        ]
+      },
+      "relevant_ids": [
+        "ai-llm-blr",
+        "ai-rag-remote",
+        "ai-ml-pune",
+        "ai-high-salary",
+        "ai-low-salary",
+        "ai-senior-blr"
+      ],
+      "forbidden_ids": [
+        "ai-unknown-country",
+        "ai-us"
+      ]
+    },
+    {
+      "name": "ai_unknown_geo__p4",
+      "family": "ai_unknown_geo",
+      "query": "applied AI opportunities",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "countries": [
+          "India"
+        ]
+      },
+      "relevant_ids": [
+        "ai-llm-blr",
+        "ai-rag-remote",
+        "ai-ml-pune",
+        "ai-high-salary",
+        "ai-low-salary",
+        "ai-senior-blr"
+      ],
+      "forbidden_ids": [
+        "ai-unknown-country",
+        "ai-us"
+      ]
+    },
+    {
+      "name": "ai_unknown_geo__p5",
+      "family": "ai_unknown_geo",
+      "query": "AI/ML jobs",
+      "preferences": {
+        "roles": [
+          "AI/ML"
+        ],
+        "countries": [
+          "India"
+        ]
+      },
+      "relevant_ids": [
+        "ai-llm-blr",
+        "ai-rag-remote",
+        "ai-ml-pune",
+        "ai-high-salary",
+        "ai-low-salary",
+        "ai-senior-blr"
+      ],
+      "forbidden_ids": [
+        "ai-unknown-country",
+        "ai-us"
+      ]
+    },
+    {
+      "name": "cv_india_junior__p1",
+      "family": "cv_india_junior",
+      "query": "PyTorch vision roles",
+      "preferences": {
+        "roles": [
+          "Computer Vision"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "cv-blr",
+        "cv-pune"
+      ],
+      "forbidden_ids": [
+        "cv-senior",
+        "designer-blr"
+      ]
+    },
+    {
+      "name": "cv_india_junior__p2",
+      "family": "cv_india_junior",
+      "query": "computer vision jobs",
+      "preferences": {
+        "roles": [
+          "Computer Vision"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "cv-blr",
+        "cv-pune"
+      ],
+      "forbidden_ids": [
+        "cv-senior",
+        "designer-blr"
+      ]
+    },
+    {
+      "name": "cv_india_junior__p3",
+      "family": "cv_india_junior",
+      "query": "perception engineering",
+      "preferences": {
+        "roles": [
+          "Computer Vision"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "cv-blr",
+        "cv-pune"
+      ],
+      "forbidden_ids": [
+        "cv-senior",
+        "designer-blr"
+      ]
+    },
+    {
+      "name": "cv_india_junior__p4",
+      "family": "cv_india_junior",
+      "query": "detection segmentation work",
+      "preferences": {
+        "roles": [
+          "Computer Vision"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "cv-blr",
+        "cv-pune"
+      ],
+      "forbidden_ids": [
+        "cv-senior",
+        "designer-blr"
+      ]
+    },
+    {
+      "name": "cv_india_junior__p5",
+      "family": "cv_india_junior",
+      "query": "vision ML opportunities",
+      "preferences": {
+        "roles": [
+          "Computer Vision"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "cv-blr",
+        "cv-pune"
+      ],
+      "forbidden_ids": [
+        "cv-senior",
+        "designer-blr"
+      ]
+    },
+    {
+      "name": "cv_bengaluru__p1",
+      "family": "cv_bengaluru",
+      "query": "PyTorch vision roles",
+      "preferences": {
+        "roles": [
+          "Computer Vision"
+        ],
+        "locations": [
+          "Bengaluru"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "cv-blr"
+      ],
+      "forbidden_ids": [
+        "cv-pune",
+        "cv-senior"
+      ]
+    },
+    {
+      "name": "cv_bengaluru__p2",
+      "family": "cv_bengaluru",
+      "query": "computer vision jobs",
+      "preferences": {
+        "roles": [
+          "Computer Vision"
+        ],
+        "locations": [
+          "Bengaluru"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "cv-blr"
+      ],
+      "forbidden_ids": [
+        "cv-pune",
+        "cv-senior"
+      ]
+    },
+    {
+      "name": "cv_bengaluru__p3",
+      "family": "cv_bengaluru",
+      "query": "perception engineering",
+      "preferences": {
+        "roles": [
+          "Computer Vision"
+        ],
+        "locations": [
+          "Bengaluru"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "cv-blr"
+      ],
+      "forbidden_ids": [
+        "cv-pune",
+        "cv-senior"
+      ]
+    },
+    {
+      "name": "cv_bengaluru__p4",
+      "family": "cv_bengaluru",
+      "query": "detection segmentation work",
+      "preferences": {
+        "roles": [
+          "Computer Vision"
+        ],
+        "locations": [
+          "Bengaluru"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "cv-blr"
+      ],
+      "forbidden_ids": [
+        "cv-pune",
+        "cv-senior"
+      ]
+    },
+    {
+      "name": "cv_bengaluru__p5",
+      "family": "cv_bengaluru",
+      "query": "vision ML opportunities",
+      "preferences": {
+        "roles": [
+          "Computer Vision"
+        ],
+        "locations": [
+          "Bengaluru"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "cv-blr"
+      ],
+      "forbidden_ids": [
+        "cv-pune",
+        "cv-senior"
+      ]
+    },
+    {
+      "name": "cv_avoid_hardware__p1",
+      "family": "cv_avoid_hardware",
+      "query": "PyTorch vision roles",
+      "preferences": {
+        "roles": [
+          "Computer Vision"
+        ],
+        "countries": [
+          "India"
+        ],
+        "avoid_terms": [
+          "hardware"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "cv-blr",
+        "cv-pune"
+      ],
+      "forbidden_ids": [
+        "hardware-ai-blr"
+      ]
+    },
+    {
+      "name": "cv_avoid_hardware__p2",
+      "family": "cv_avoid_hardware",
+      "query": "computer vision jobs",
+      "preferences": {
+        "roles": [
+          "Computer Vision"
+        ],
+        "countries": [
+          "India"
+        ],
+        "avoid_terms": [
+          "hardware"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "cv-blr",
+        "cv-pune"
+      ],
+      "forbidden_ids": [
+        "hardware-ai-blr"
+      ]
+    },
+    {
+      "name": "cv_avoid_hardware__p3",
+      "family": "cv_avoid_hardware",
+      "query": "perception engineering",
+      "preferences": {
+        "roles": [
+          "Computer Vision"
+        ],
+        "countries": [
+          "India"
+        ],
+        "avoid_terms": [
+          "hardware"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "cv-blr",
+        "cv-pune"
+      ],
+      "forbidden_ids": [
+        "hardware-ai-blr"
+      ]
+    },
+    {
+      "name": "cv_avoid_hardware__p4",
+      "family": "cv_avoid_hardware",
+      "query": "detection segmentation work",
+      "preferences": {
+        "roles": [
+          "Computer Vision"
+        ],
+        "countries": [
+          "India"
+        ],
+        "avoid_terms": [
+          "hardware"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "cv-blr",
+        "cv-pune"
+      ],
+      "forbidden_ids": [
+        "hardware-ai-blr"
+      ]
+    },
+    {
+      "name": "cv_avoid_hardware__p5",
+      "family": "cv_avoid_hardware",
+      "query": "vision ML opportunities",
+      "preferences": {
+        "roles": [
+          "Computer Vision"
+        ],
+        "countries": [
+          "India"
+        ],
+        "avoid_terms": [
+          "hardware"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "cv-blr",
+        "cv-pune"
+      ],
+      "forbidden_ids": [
+        "hardware-ai-blr"
+      ]
+    },
+    {
+      "name": "backend_india__p1",
+      "family": "backend_india",
+      "query": "Python backend APIs",
+      "preferences": {
+        "roles": [
+          "Backend"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "backend-pune",
+        "platform-blr",
+        "backend-remote",
+        "fullstack-pune"
+      ],
+      "forbidden_ids": [
+        "backend-us",
+        "designer-blr"
+      ]
+    },
+    {
+      "name": "backend_india__p2",
+      "family": "backend_india",
+      "query": "backend engineering jobs",
+      "preferences": {
+        "roles": [
+          "Backend"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "backend-pune",
+        "platform-blr",
+        "backend-remote",
+        "fullstack-pune"
+      ],
+      "forbidden_ids": [
+        "backend-us",
+        "designer-blr"
+      ]
+    },
+    {
+      "name": "backend_india__p3",
+      "family": "backend_india",
+      "query": "platform backend work",
+      "preferences": {
+        "roles": [
+          "Backend"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "backend-pune",
+        "platform-blr",
+        "backend-remote",
+        "fullstack-pune"
+      ],
+      "forbidden_ids": [
+        "backend-us",
+        "designer-blr"
+      ]
+    },
+    {
+      "name": "backend_india__p4",
+      "family": "backend_india",
+      "query": "distributed API roles",
+      "preferences": {
+        "roles": [
+          "Backend"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "backend-pune",
+        "platform-blr",
+        "backend-remote",
+        "fullstack-pune"
+      ],
+      "forbidden_ids": [
+        "backend-us",
+        "designer-blr"
+      ]
+    },
+    {
+      "name": "backend_india__p5",
+      "family": "backend_india",
+      "query": "server-side Python",
+      "preferences": {
+        "roles": [
+          "Backend"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "backend-pune",
+        "platform-blr",
+        "backend-remote",
+        "fullstack-pune"
+      ],
+      "forbidden_ids": [
+        "backend-us",
+        "designer-blr"
+      ]
+    },
+    {
+      "name": "backend_pune__p1",
+      "family": "backend_pune",
+      "query": "Python backend APIs",
+      "preferences": {
+        "roles": [
+          "Backend"
+        ],
+        "locations": [
+          "Pune"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "backend-pune",
+        "fullstack-pune"
+      ],
+      "forbidden_ids": [
+        "platform-blr",
+        "backend-us"
+      ]
+    },
+    {
+      "name": "backend_pune__p2",
+      "family": "backend_pune",
+      "query": "backend engineering jobs",
+      "preferences": {
+        "roles": [
+          "Backend"
+        ],
+        "locations": [
+          "Pune"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "backend-pune",
+        "fullstack-pune"
+      ],
+      "forbidden_ids": [
+        "platform-blr",
+        "backend-us"
+      ]
+    },
+    {
+      "name": "backend_pune__p3",
+      "family": "backend_pune",
+      "query": "platform backend work",
+      "preferences": {
+        "roles": [
+          "Backend"
+        ],
+        "locations": [
+          "Pune"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "backend-pune",
+        "fullstack-pune"
+      ],
+      "forbidden_ids": [
+        "platform-blr",
+        "backend-us"
+      ]
+    },
+    {
+      "name": "backend_pune__p4",
+      "family": "backend_pune",
+      "query": "distributed API roles",
+      "preferences": {
+        "roles": [
+          "Backend"
+        ],
+        "locations": [
+          "Pune"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "backend-pune",
+        "fullstack-pune"
+      ],
+      "forbidden_ids": [
+        "platform-blr",
+        "backend-us"
+      ]
+    },
+    {
+      "name": "backend_pune__p5",
+      "family": "backend_pune",
+      "query": "server-side Python",
+      "preferences": {
+        "roles": [
+          "Backend"
+        ],
+        "locations": [
+          "Pune"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "backend-pune",
+        "fullstack-pune"
+      ],
+      "forbidden_ids": [
+        "platform-blr",
+        "backend-us"
+      ]
+    },
+    {
+      "name": "backend_remote_only__p1",
+      "family": "backend_remote_only",
+      "query": "Python backend APIs",
+      "preferences": {
+        "roles": [
+          "Backend"
+        ],
+        "countries": [
+          "India"
+        ],
+        "remote_ok": true,
+        "onsite_ok": false
+      },
+      "relevant_ids": [
+        "backend-remote"
+      ],
+      "forbidden_ids": [
+        "backend-pune",
+        "backend-us"
+      ]
+    },
+    {
+      "name": "backend_remote_only__p2",
+      "family": "backend_remote_only",
+      "query": "backend engineering jobs",
+      "preferences": {
+        "roles": [
+          "Backend"
+        ],
+        "countries": [
+          "India"
+        ],
+        "remote_ok": true,
+        "onsite_ok": false
+      },
+      "relevant_ids": [
+        "backend-remote"
+      ],
+      "forbidden_ids": [
+        "backend-pune",
+        "backend-us"
+      ]
+    },
+    {
+      "name": "backend_remote_only__p3",
+      "family": "backend_remote_only",
+      "query": "platform backend work",
+      "preferences": {
+        "roles": [
+          "Backend"
+        ],
+        "countries": [
+          "India"
+        ],
+        "remote_ok": true,
+        "onsite_ok": false
+      },
+      "relevant_ids": [
+        "backend-remote"
+      ],
+      "forbidden_ids": [
+        "backend-pune",
+        "backend-us"
+      ]
+    },
+    {
+      "name": "backend_remote_only__p4",
+      "family": "backend_remote_only",
+      "query": "distributed API roles",
+      "preferences": {
+        "roles": [
+          "Backend"
+        ],
+        "countries": [
+          "India"
+        ],
+        "remote_ok": true,
+        "onsite_ok": false
+      },
+      "relevant_ids": [
+        "backend-remote"
+      ],
+      "forbidden_ids": [
+        "backend-pune",
+        "backend-us"
+      ]
+    },
+    {
+      "name": "backend_remote_only__p5",
+      "family": "backend_remote_only",
+      "query": "server-side Python",
+      "preferences": {
+        "roles": [
+          "Backend"
+        ],
+        "countries": [
+          "India"
+        ],
+        "remote_ok": true,
+        "onsite_ok": false
+      },
+      "relevant_ids": [
+        "backend-remote"
+      ],
+      "forbidden_ids": [
+        "backend-pune",
+        "backend-us"
+      ]
+    },
+    {
+      "name": "backend_salary_11__p1",
+      "family": "backend_salary_11",
+      "query": "Python backend APIs",
+      "preferences": {
+        "roles": [
+          "Backend"
+        ],
+        "countries": [
+          "India"
+        ],
+        "min_salary_lpa": 11,
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "platform-blr",
+        "backend-remote"
+      ],
+      "forbidden_ids": [
+        "backend-pune",
+        "backend-us"
+      ]
+    },
+    {
+      "name": "backend_salary_11__p2",
+      "family": "backend_salary_11",
+      "query": "backend engineering jobs",
+      "preferences": {
+        "roles": [
+          "Backend"
+        ],
+        "countries": [
+          "India"
+        ],
+        "min_salary_lpa": 11,
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "platform-blr",
+        "backend-remote"
+      ],
+      "forbidden_ids": [
+        "backend-pune",
+        "backend-us"
+      ]
+    },
+    {
+      "name": "backend_salary_11__p3",
+      "family": "backend_salary_11",
+      "query": "platform backend work",
+      "preferences": {
+        "roles": [
+          "Backend"
+        ],
+        "countries": [
+          "India"
+        ],
+        "min_salary_lpa": 11,
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "platform-blr",
+        "backend-remote"
+      ],
+      "forbidden_ids": [
+        "backend-pune",
+        "backend-us"
+      ]
+    },
+    {
+      "name": "backend_salary_11__p4",
+      "family": "backend_salary_11",
+      "query": "distributed API roles",
+      "preferences": {
+        "roles": [
+          "Backend"
+        ],
+        "countries": [
+          "India"
+        ],
+        "min_salary_lpa": 11,
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "platform-blr",
+        "backend-remote"
+      ],
+      "forbidden_ids": [
+        "backend-pune",
+        "backend-us"
+      ]
+    },
+    {
+      "name": "backend_salary_11__p5",
+      "family": "backend_salary_11",
+      "query": "server-side Python",
+      "preferences": {
+        "roles": [
+          "Backend"
+        ],
+        "countries": [
+          "India"
+        ],
+        "min_salary_lpa": 11,
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "platform-blr",
+        "backend-remote"
+      ],
+      "forbidden_ids": [
+        "backend-pune",
+        "backend-us"
+      ]
+    },
+    {
+      "name": "backend_reject_platform__p1",
+      "family": "backend_reject_platform",
+      "query": "Python backend APIs",
+      "preferences": {
+        "roles": [
+          "Backend"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "backend-pune",
+        "backend-remote",
+        "fullstack-pune"
+      ],
+      "forbidden_ids": [
+        "platform-blr"
+      ],
+      "rejected_ids": [
+        "benchmark:v2:platform-blr"
+      ]
+    },
+    {
+      "name": "backend_reject_platform__p2",
+      "family": "backend_reject_platform",
+      "query": "backend engineering jobs",
+      "preferences": {
+        "roles": [
+          "Backend"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "backend-pune",
+        "backend-remote",
+        "fullstack-pune"
+      ],
+      "forbidden_ids": [
+        "platform-blr"
+      ],
+      "rejected_ids": [
+        "benchmark:v2:platform-blr"
+      ]
+    },
+    {
+      "name": "backend_reject_platform__p3",
+      "family": "backend_reject_platform",
+      "query": "platform backend work",
+      "preferences": {
+        "roles": [
+          "Backend"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "backend-pune",
+        "backend-remote",
+        "fullstack-pune"
+      ],
+      "forbidden_ids": [
+        "platform-blr"
+      ],
+      "rejected_ids": [
+        "benchmark:v2:platform-blr"
+      ]
+    },
+    {
+      "name": "backend_reject_platform__p4",
+      "family": "backend_reject_platform",
+      "query": "distributed API roles",
+      "preferences": {
+        "roles": [
+          "Backend"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "backend-pune",
+        "backend-remote",
+        "fullstack-pune"
+      ],
+      "forbidden_ids": [
+        "platform-blr"
+      ],
+      "rejected_ids": [
+        "benchmark:v2:platform-blr"
+      ]
+    },
+    {
+      "name": "backend_reject_platform__p5",
+      "family": "backend_reject_platform",
+      "query": "server-side Python",
+      "preferences": {
+        "roles": [
+          "Backend"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "backend-pune",
+        "backend-remote",
+        "fullstack-pune"
+      ],
+      "forbidden_ids": [
+        "platform-blr"
+      ],
+      "rejected_ids": [
+        "benchmark:v2:platform-blr"
+      ]
+    },
+    {
+      "name": "swe_india__p1",
+      "family": "swe_india",
+      "query": "software engineering jobs",
+      "preferences": {
+        "roles": [
+          "Software Engineering"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "swe-blr",
+        "fullstack-pune"
+      ],
+      "forbidden_ids": [
+        "designer-blr",
+        "sales-blr"
+      ]
+    },
+    {
+      "name": "swe_india__p2",
+      "family": "swe_india",
+      "query": "developer roles",
+      "preferences": {
+        "roles": [
+          "Software Engineering"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "swe-blr",
+        "fullstack-pune"
+      ],
+      "forbidden_ids": [
+        "designer-blr",
+        "sales-blr"
+      ]
+    },
+    {
+      "name": "swe_india__p3",
+      "family": "swe_india",
+      "query": "production software work",
+      "preferences": {
+        "roles": [
+          "Software Engineering"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "swe-blr",
+        "fullstack-pune"
+      ],
+      "forbidden_ids": [
+        "designer-blr",
+        "sales-blr"
+      ]
+    },
+    {
+      "name": "swe_india__p4",
+      "family": "swe_india",
+      "query": "application engineering",
+      "preferences": {
+        "roles": [
+          "Software Engineering"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "swe-blr",
+        "fullstack-pune"
+      ],
+      "forbidden_ids": [
+        "designer-blr",
+        "sales-blr"
+      ]
+    },
+    {
+      "name": "swe_india__p5",
+      "family": "swe_india",
+      "query": "software developer jobs",
+      "preferences": {
+        "roles": [
+          "Software Engineering"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "swe-blr",
+        "fullstack-pune"
+      ],
+      "forbidden_ids": [
+        "designer-blr",
+        "sales-blr"
+      ]
+    },
+    {
+      "name": "swe_avoid_embedded__p1",
+      "family": "swe_avoid_embedded",
+      "query": "software engineering jobs",
+      "preferences": {
+        "roles": [
+          "Software Engineering"
+        ],
+        "countries": [
+          "India"
+        ],
+        "avoid_terms": [
+          "embedded"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "swe-blr",
+        "fullstack-pune"
+      ],
+      "forbidden_ids": [
+        "embedded-blr"
+      ]
+    },
+    {
+      "name": "swe_avoid_embedded__p2",
+      "family": "swe_avoid_embedded",
+      "query": "developer roles",
+      "preferences": {
+        "roles": [
+          "Software Engineering"
+        ],
+        "countries": [
+          "India"
+        ],
+        "avoid_terms": [
+          "embedded"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "swe-blr",
+        "fullstack-pune"
+      ],
+      "forbidden_ids": [
+        "embedded-blr"
+      ]
+    },
+    {
+      "name": "swe_avoid_embedded__p3",
+      "family": "swe_avoid_embedded",
+      "query": "production software work",
+      "preferences": {
+        "roles": [
+          "Software Engineering"
+        ],
+        "countries": [
+          "India"
+        ],
+        "avoid_terms": [
+          "embedded"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "swe-blr",
+        "fullstack-pune"
+      ],
+      "forbidden_ids": [
+        "embedded-blr"
+      ]
+    },
+    {
+      "name": "swe_avoid_embedded__p4",
+      "family": "swe_avoid_embedded",
+      "query": "application engineering",
+      "preferences": {
+        "roles": [
+          "Software Engineering"
+        ],
+        "countries": [
+          "India"
+        ],
+        "avoid_terms": [
+          "embedded"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "swe-blr",
+        "fullstack-pune"
+      ],
+      "forbidden_ids": [
+        "embedded-blr"
+      ]
+    },
+    {
+      "name": "swe_avoid_embedded__p5",
+      "family": "swe_avoid_embedded",
+      "query": "software developer jobs",
+      "preferences": {
+        "roles": [
+          "Software Engineering"
+        ],
+        "countries": [
+          "India"
+        ],
+        "avoid_terms": [
+          "embedded"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "swe-blr",
+        "fullstack-pune"
+      ],
+      "forbidden_ids": [
+        "embedded-blr"
+      ]
+    },
+    {
+      "name": "qa_india__p1",
+      "family": "qa_india",
+      "query": "QA automation jobs",
+      "preferences": {
+        "roles": [
+          "QA"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "qa-blr",
+        "sdet-pune"
+      ],
+      "forbidden_ids": [
+        "designer-blr"
+      ]
+    },
+    {
+      "name": "qa_india__p2",
+      "family": "qa_india",
+      "query": "test engineering",
+      "preferences": {
+        "roles": [
+          "QA"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "qa-blr",
+        "sdet-pune"
+      ],
+      "forbidden_ids": [
+        "designer-blr"
+      ]
+    },
+    {
+      "name": "qa_india__p3",
+      "family": "qa_india",
+      "query": "SDET opportunities",
+      "preferences": {
+        "roles": [
+          "QA"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "qa-blr",
+        "sdet-pune"
+      ],
+      "forbidden_ids": [
+        "designer-blr"
+      ]
+    },
+    {
+      "name": "qa_india__p4",
+      "family": "qa_india",
+      "query": "software testing roles",
+      "preferences": {
+        "roles": [
+          "QA"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "qa-blr",
+        "sdet-pune"
+      ],
+      "forbidden_ids": [
+        "designer-blr"
+      ]
+    },
+    {
+      "name": "qa_india__p5",
+      "family": "qa_india",
+      "query": "quality engineering",
+      "preferences": {
+        "roles": [
+          "QA"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "qa-blr",
+        "sdet-pune"
+      ],
+      "forbidden_ids": [
+        "designer-blr"
+      ]
+    },
+    {
+      "name": "qa_pune__p1",
+      "family": "qa_pune",
+      "query": "QA automation jobs",
+      "preferences": {
+        "roles": [
+          "QA"
+        ],
+        "locations": [
+          "Pune"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "sdet-pune"
+      ],
+      "forbidden_ids": [
+        "qa-blr"
+      ]
+    },
+    {
+      "name": "qa_pune__p2",
+      "family": "qa_pune",
+      "query": "test engineering",
+      "preferences": {
+        "roles": [
+          "QA"
+        ],
+        "locations": [
+          "Pune"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "sdet-pune"
+      ],
+      "forbidden_ids": [
+        "qa-blr"
+      ]
+    },
+    {
+      "name": "qa_pune__p3",
+      "family": "qa_pune",
+      "query": "SDET opportunities",
+      "preferences": {
+        "roles": [
+          "QA"
+        ],
+        "locations": [
+          "Pune"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "sdet-pune"
+      ],
+      "forbidden_ids": [
+        "qa-blr"
+      ]
+    },
+    {
+      "name": "qa_pune__p4",
+      "family": "qa_pune",
+      "query": "software testing roles",
+      "preferences": {
+        "roles": [
+          "QA"
+        ],
+        "locations": [
+          "Pune"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "sdet-pune"
+      ],
+      "forbidden_ids": [
+        "qa-blr"
+      ]
+    },
+    {
+      "name": "qa_pune__p5",
+      "family": "qa_pune",
+      "query": "quality engineering",
+      "preferences": {
+        "roles": [
+          "QA"
+        ],
+        "locations": [
+          "Pune"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "sdet-pune"
+      ],
+      "forbidden_ids": [
+        "qa-blr"
+      ]
+    },
+    {
+      "name": "data_engineering__p1",
+      "family": "data_engineering",
+      "query": "Python SQL data engineering",
+      "preferences": {
+        "roles": [
+          "Data Engineering"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "data-eng-hyd"
+      ],
+      "forbidden_ids": [
+        "data-science-blr",
+        "designer-blr"
+      ]
+    },
+    {
+      "name": "data_engineering__p2",
+      "family": "data_engineering",
+      "query": "ETL data roles",
+      "preferences": {
+        "roles": [
+          "Data Engineering"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "data-eng-hyd"
+      ],
+      "forbidden_ids": [
+        "data-science-blr",
+        "designer-blr"
+      ]
+    },
+    {
+      "name": "data_engineering__p3",
+      "family": "data_engineering",
+      "query": "data pipeline jobs",
+      "preferences": {
+        "roles": [
+          "Data Engineering"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "data-eng-hyd"
+      ],
+      "forbidden_ids": [
+        "data-science-blr",
+        "designer-blr"
+      ]
+    },
+    {
+      "name": "data_engineering__p4",
+      "family": "data_engineering",
+      "query": "analytics engineering work",
+      "preferences": {
+        "roles": [
+          "Data Engineering"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "data-eng-hyd"
+      ],
+      "forbidden_ids": [
+        "data-science-blr",
+        "designer-blr"
+      ]
+    },
+    {
+      "name": "data_engineering__p5",
+      "family": "data_engineering",
+      "query": "data engineering",
+      "preferences": {
+        "roles": [
+          "Data Engineering"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "data-eng-hyd"
+      ],
+      "forbidden_ids": [
+        "data-science-blr",
+        "designer-blr"
+      ]
+    },
+    {
+      "name": "data_science__p1",
+      "family": "data_science",
+      "query": "data science roles",
+      "preferences": {
+        "roles": [
+          "Data Science"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "data-science-blr"
+      ],
+      "forbidden_ids": [
+        "data-eng-hyd",
+        "designer-blr"
+      ]
+    },
+    {
+      "name": "data_science__p2",
+      "family": "data_science",
+      "query": "Python modeling jobs",
+      "preferences": {
+        "roles": [
+          "Data Science"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "data-science-blr"
+      ],
+      "forbidden_ids": [
+        "data-eng-hyd",
+        "designer-blr"
+      ]
+    },
+    {
+      "name": "data_science__p3",
+      "family": "data_science",
+      "query": "data scientist opportunities",
+      "preferences": {
+        "roles": [
+          "Data Science"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "data-science-blr"
+      ],
+      "forbidden_ids": [
+        "data-eng-hyd",
+        "designer-blr"
+      ]
+    },
+    {
+      "name": "data_science__p4",
+      "family": "data_science",
+      "query": "statistical modeling work",
+      "preferences": {
+        "roles": [
+          "Data Science"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "data-science-blr"
+      ],
+      "forbidden_ids": [
+        "data-eng-hyd",
+        "designer-blr"
+      ]
+    },
+    {
+      "name": "data_science__p5",
+      "family": "data_science",
+      "query": "data science Python",
+      "preferences": {
+        "roles": [
+          "Data Science"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "data-science-blr"
+      ],
+      "forbidden_ids": [
+        "data-eng-hyd",
+        "designer-blr"
+      ]
+    },
+    {
+      "name": "mixed_ai_backend__p1",
+      "family": "mixed_ai_backend",
+      "query": "Python AI backend",
+      "preferences": {
+        "roles": [
+          "AI/ML",
+          "Backend"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "ai-llm-blr",
+        "ai-rag-remote",
+        "ai-ml-pune",
+        "ai-low-salary",
+        "ai-high-salary",
+        "backend-pune",
+        "platform-blr",
+        "backend-remote",
+        "fullstack-pune"
+      ],
+      "forbidden_ids": [
+        "designer-blr",
+        "sales-blr",
+        "backend-us"
+      ]
+    },
+    {
+      "name": "mixed_ai_backend__p2",
+      "family": "mixed_ai_backend",
+      "query": "LLM platform engineering",
+      "preferences": {
+        "roles": [
+          "AI/ML",
+          "Backend"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "ai-llm-blr",
+        "ai-rag-remote",
+        "ai-ml-pune",
+        "ai-low-salary",
+        "ai-high-salary",
+        "backend-pune",
+        "platform-blr",
+        "backend-remote",
+        "fullstack-pune"
+      ],
+      "forbidden_ids": [
+        "designer-blr",
+        "sales-blr",
+        "backend-us"
+      ]
+    },
+    {
+      "name": "mixed_ai_backend__p3",
+      "family": "mixed_ai_backend",
+      "query": "AI APIs and retrieval",
+      "preferences": {
+        "roles": [
+          "AI/ML",
+          "Backend"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "ai-llm-blr",
+        "ai-rag-remote",
+        "ai-ml-pune",
+        "ai-low-salary",
+        "ai-high-salary",
+        "backend-pune",
+        "platform-blr",
+        "backend-remote",
+        "fullstack-pune"
+      ],
+      "forbidden_ids": [
+        "designer-blr",
+        "sales-blr",
+        "backend-us"
+      ]
+    },
+    {
+      "name": "mixed_ai_backend__p4",
+      "family": "mixed_ai_backend",
+      "query": "machine learning backend",
+      "preferences": {
+        "roles": [
+          "AI/ML",
+          "Backend"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "ai-llm-blr",
+        "ai-rag-remote",
+        "ai-ml-pune",
+        "ai-low-salary",
+        "ai-high-salary",
+        "backend-pune",
+        "platform-blr",
+        "backend-remote",
+        "fullstack-pune"
+      ],
+      "forbidden_ids": [
+        "designer-blr",
+        "sales-blr",
+        "backend-us"
+      ]
+    },
+    {
+      "name": "mixed_ai_backend__p5",
+      "family": "mixed_ai_backend",
+      "query": "agents and backend systems",
+      "preferences": {
+        "roles": [
+          "AI/ML",
+          "Backend"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "ai-llm-blr",
+        "ai-rag-remote",
+        "ai-ml-pune",
+        "ai-low-salary",
+        "ai-high-salary",
+        "backend-pune",
+        "platform-blr",
+        "backend-remote",
+        "fullstack-pune"
+      ],
+      "forbidden_ids": [
+        "designer-blr",
+        "sales-blr",
+        "backend-us"
+      ]
+    },
+    {
+      "name": "mixed_cv_backend__p1",
+      "family": "mixed_cv_backend",
+      "query": "vision backend systems",
+      "preferences": {
+        "roles": [
+          "Computer Vision",
+          "Backend"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "cv-blr",
+        "cv-pune",
+        "backend-pune",
+        "platform-blr",
+        "backend-remote",
+        "fullstack-pune"
+      ],
+      "forbidden_ids": [
+        "designer-blr",
+        "backend-us",
+        "cv-senior"
+      ]
+    },
+    {
+      "name": "mixed_cv_backend__p2",
+      "family": "mixed_cv_backend",
+      "query": "computer vision APIs",
+      "preferences": {
+        "roles": [
+          "Computer Vision",
+          "Backend"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "cv-blr",
+        "cv-pune",
+        "backend-pune",
+        "platform-blr",
+        "backend-remote",
+        "fullstack-pune"
+      ],
+      "forbidden_ids": [
+        "designer-blr",
+        "backend-us",
+        "cv-senior"
+      ]
+    },
+    {
+      "name": "mixed_cv_backend__p3",
+      "family": "mixed_cv_backend",
+      "query": "perception platform roles",
+      "preferences": {
+        "roles": [
+          "Computer Vision",
+          "Backend"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "cv-blr",
+        "cv-pune",
+        "backend-pune",
+        "platform-blr",
+        "backend-remote",
+        "fullstack-pune"
+      ],
+      "forbidden_ids": [
+        "designer-blr",
+        "backend-us",
+        "cv-senior"
+      ]
+    },
+    {
+      "name": "mixed_cv_backend__p4",
+      "family": "mixed_cv_backend",
+      "query": "Python CV backend",
+      "preferences": {
+        "roles": [
+          "Computer Vision",
+          "Backend"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "cv-blr",
+        "cv-pune",
+        "backend-pune",
+        "platform-blr",
+        "backend-remote",
+        "fullstack-pune"
+      ],
+      "forbidden_ids": [
+        "designer-blr",
+        "backend-us",
+        "cv-senior"
+      ]
+    },
+    {
+      "name": "mixed_cv_backend__p5",
+      "family": "mixed_cv_backend",
+      "query": "vision infrastructure",
+      "preferences": {
+        "roles": [
+          "Computer Vision",
+          "Backend"
+        ],
+        "countries": [
+          "India"
+        ],
+        "max_required_experience_years": 2
+      },
+      "relevant_ids": [
+        "cv-blr",
+        "cv-pune",
+        "backend-pune",
+        "platform-blr",
+        "backend-remote",
+        "fullstack-pune"
+      ],
+      "forbidden_ids": [
+        "designer-blr",
+        "backend-us",
+        "cv-senior"
+      ]
+    }
+  ]
+}
