@@ -7,6 +7,7 @@ from boardforge.agent import JobAgent
 from boardforge.models import FeedbackRequest, PreferenceUpdate, SearchRequest
 from boardforge.store import Store
 from boardforge.sync import sync_url
+from boardforge.tool_agent import ToolCallingAgent
 
 
 app = FastAPI(
@@ -15,7 +16,8 @@ app = FastAPI(
     description="Job intelligence infrastructure: ingest, track, personalize, rank and evaluate.",
 )
 store = Store()
-agent = JobAgent(store)
+core_agent = JobAgent(store)
+tool_agent = ToolCallingAgent(core_agent)
 
 
 class SyncRequest(BaseModel):
@@ -24,7 +26,7 @@ class SyncRequest(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "0.2.0"}
+    return {"status":"ok","version":"0.2.0"}
 
 
 @app.post("/sync")
@@ -37,23 +39,22 @@ async def sync(req: SyncRequest):
 
 @app.post("/preferences")
 async def preferences(req: PreferenceUpdate):
-    result = await agent.update_preferences(req.profile_id, req.text)
-    return {"message": result.message, "preferences": result.data}
+    result = await core_agent.update_preferences(req.profile_id, req.text)
+    return {"message":result.message,"preferences":result.data}
 
 
 @app.post("/search")
 async def search(req: SearchRequest):
-    result = await agent.search_jobs(req.profile_id, req.query, req.top_k)
+    result = await core_agent.search_jobs(req.profile_id, req.query, req.top_k)
     return result.data
 
 
 @app.post("/feedback")
 async def feedback(req: FeedbackRequest):
-    result = await agent.record_feedback(req)
-    return {"message": result.message, **result.data}
+    result = await core_agent.record_feedback(req)
+    return {"message":result.message,**result.data}
 
 
 @app.post("/agent")
 async def agent_turn(req: SearchRequest):
-    result = await agent.handle(req.profile_id, req.query, req.top_k)
-    return {"message": result.message, **result.data}
+    return await tool_agent.run(req.profile_id, req.query)
