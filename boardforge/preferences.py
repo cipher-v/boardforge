@@ -33,7 +33,7 @@ def deterministic_extract(text: str, current: Preferences | None = None) -> Pref
                 p.avoid_terms.append(term)
 
     for raw, canonical in ROLE_MAP.items():
-        if raw in low and canonical not in p.roles:
+        if re.search(rf"\b{re.escape(raw)}\b", low) and canonical not in p.roles:
             p.roles.append(canonical)
 
     for city in CITIES:
@@ -50,7 +50,10 @@ def deterministic_extract(text: str, current: Preferences | None = None) -> Pref
     if m:
         p.max_required_experience_years = float(m.group(1))
 
-    if any(x in low for x in ["no unpaid","paid only","only paid"]):
+    if (
+        any(x in low for x in ["no unpaid", "paid only", "only paid", "unpaid internship", "unpaid internships"])
+        or ("avoid" in low and "unpaid" in low)
+    ):
         p.paid_only = True
 
     if "remote" in low:
