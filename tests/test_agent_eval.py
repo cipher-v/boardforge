@@ -22,3 +22,11 @@ def test_agent_tool_dataset_has_40_cases():
     report = run_deterministic_tool_eval()
     assert report["cases"] == 40
     assert 0.0 <= report["macro"]["exact_sequence_accuracy"] <= 1.0
+
+
+def test_tool_planner_negated_show_is_preference_only():
+    assert deterministic_tool_plan("Do not show QA roles anymore") == ["update_preferences"]
+
+
+def test_tool_planner_not_clause_updates_preferences():
+    assert deterministic_tool_plan("Not QA, but AI and backend are good") == ["update_preferences"]
