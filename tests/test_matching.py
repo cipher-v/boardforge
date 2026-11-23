@@ -93,3 +93,19 @@ def test_known_salary_below_minimum_is_excluded():
     underpaid.salary_min = 900_000
     underpaid.salary_period = "year"
     assert "salary" in hard_violations(underpaid, p)
+
+
+def test_unknown_salary_is_demoted_when_minimum_salary_is_requested():
+    p = Preferences(roles=["AI/ML"], countries=["India"], min_salary_lpa=12)
+    known = Job(
+        source_kind="x", source_key="demo", external_id="known",
+        title="AI Engineer", company="Demo", country="India",
+        salary_currency="INR", salary_min=1400000, salary_period="year",
+    )
+    unknown = Job(
+        source_kind="x", source_key="demo", external_id="unknown",
+        title="AI Engineer", company="Demo", country="India",
+    )
+    ranked = rank_jobs([unknown, known], p, query="AI")
+    assert ranked[0].job.external_id == "known"
+    assert ranked[1].status == "needs_verification"
