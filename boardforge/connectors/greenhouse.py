@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import re
 import httpx
 from boardforge.connectors.base import JobConnector, ConnectorError
@@ -10,7 +11,10 @@ _TAGS = ["python", "sql", "llm", "rag", "computer vision", "backend", "machine l
 
 
 def _strip_html(text: str) -> str:
-    return re.sub(r"<[^>]+>", " ", text or "").replace("&nbsp;", " ").strip()
+    decoded = html.unescape(text or "")
+    cleaned = re.sub(r"<[^>]+>", " ", decoded)
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned.strip()
 
 
 class GreenhouseConnector(JobConnector):
@@ -26,12 +30,13 @@ class GreenhouseConnector(JobConnector):
         jobs = []
         for item in payload.get("jobs", []):
             description = _strip_html(item.get("content", ""))
-            text = f"{item.get('title','')} {description}".lower()
+            title = item.get("title", "")
+            text = f"{title} {description}".lower()
             jobs.append(Job(
                 source_kind=self.kind,
                 source_key=source.key,
                 external_id=str(item["id"]),
-                title=item.get("title", ""),
+                title=title,
                 company=source.key,
                 location=(item.get("location") or {}).get("name", ""),
                 description=description,
