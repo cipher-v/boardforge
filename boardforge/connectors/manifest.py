@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 import httpx
 
 from boardforge.discovery.manifest import ConnectorManifest
 from boardforge.enrich import enrich_job
 from boardforge.models import Job
+from boardforge.security import has_sensitive_query, validate_public_url
 
 
 def _dig(value: Any, path: list[str | int]) -> Any:
@@ -33,9 +35,14 @@ def _value(row: dict, key: str | None) -> str:
 async def fetch_manifest(manifest: ConnectorManifest) -> list[Job]:
     if manifest.method != "GET":
         raise ValueError("Learned connector execution currently supports public GET endpoints only")
+    if has_sensitive_query(manifest.endpoint):
+        raise ValueError("learned connector URL contains a sensitive query parameter")
+    await asyncio.to_thread(validate_public_url, manifest.endpoint)
 
-    async with httpx.AsyncClient(timeout=20, follow_redirects=True, headers={"User-Agent":"BoardForge/0.2"}) as client:
+    async with httpx.AsyncClient(timeout=20, follow_redirects=False, headers={"User-Agent":"BoardForge/0.2"}) as client:
         r = await client.get(manifest.endpoint)
+    if r.is_redirect:
+        raise ValueError("learned connector redirects are not followed")
     r.raise_for_status()
     rows = _dig(r.json(), manifest.response_path)
     if not isinstance(rows, list):

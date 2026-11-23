@@ -3,140 +3,195 @@ from __future__ import annotations
 import math
 import re
 from collections import Counter
-from boardforge.models import Job, Match, Preferences
+
+from boardforge.enrich import salary_min_lpa
+from boardforge.models import Job, Match, MatchEvidence, Preferences
 
 
 WORD_RE = re.compile(r"[a-zA-Z0-9+#.]{2,}")
+ROLE_PATTERNS: dict[str, tuple[str, ...]] = {
+    "AI/ML": (
+        r"\bai engineer\b", r"\bml engineer\b", r"\bmachine learning\b",
+        r"\bdeep learning\b", r"\bapplied ai\b", r"\bllm engineer\b",
+        r"\brag engineer\b", r"\bretrieval engineer\b",
+        r"\bresearch (?:engineer|scientist)\b",
+    ),
+    "Computer Vision": (
+        r"\bcomputer vision\b", r"\bvision engineer\b",
+        r"\bperception engineer\b", r"\bimage processing engineer\b",
+    ),
+    "Backend": (
+        r"\bback[- ]?end\b", r"\bplatform engineer\b", r"\bapi engineer\b",
+        r"\binfrastructure engineer\b", r"\bdistributed systems?\b",
+        r"\bserver[- ]side\b", r"\bfull[- ]stack\b",
+    ),
+    "Software Engineering": (
+        r"\bsoftware engineer\b", r"\bsoftware developer\b",
+        r"\bapplication developer\b", r"\bfull[- ]stack\b",
+    ),
+    "Data Engineering": (r"\bdata engineer\b", r"\banalytics engineer\b", r"\betl engineer\b"),
+    "Data Science": (r"\bdata scientist\b", r"\bdata science\b", r"\bdecision scientist\b"),
+    "QA": (r"\bqa\b", r"\btest engineer\b", r"\bquality assurance\b", r"\bsdet\b"),
+}
 
 
 def tokens(text: str) -> list[str]:
-    return [x.lower() for x in WORD_RE.findall(text)]
+    return [value.lower() for value in WORD_RE.findall(text)]
 
 
 def job_text(job: Job) -> str:
     return " ".join([job.title, job.company, job.location, job.description, " ".join(job.tags)])
 
 
-def query_text(p: Preferences, query: str = "") -> str:
-    return " ".join(p.roles + p.locations + p.prefer_terms + [query])
+def query_text(preferences: Preferences, query: str = "") -> str:
+    return " ".join(preferences.roles + preferences.locations + preferences.prefer_terms + [query])
 
 
-def lexical_score(job: Job, p: Preferences, query: str = "") -> float:
-    q = Counter(tokens(query_text(p, query)))
-    d = Counter(tokens(job_text(job)))
+def _cosine_overlap(query: str, document: str) -> float:
+    q = Counter(tokens(query))
+    d = Counter(tokens(document))
     if not q or not d:
         return 0.0
-    overlap = sum(min(q[t], d[t]) for t in q)
+    overlap = sum(min(q[token], d[token]) for token in q)
     return overlap / math.sqrt(sum(q.values()) * sum(d.values()))
 
 
-def hard_violations(job: Job, p: Preferences) -> list[str]:
+def lexical_score(job: Job, preferences: Preferences, query: str = "") -> float:
+    q = query_text(preferences, query)
+    title_and_tags = " ".join([job.title, " ".join(job.tags)])
+    return (0.7 * _cosine_overlap(q, title_and_tags)) + (0.3 * _cosine_overlap(q, job_text(job)))
+
+
+def _contains_phrase(text: str, phrase: str) -> bool:
+    return bool(re.search(rf"(?<!\w){re.escape(phrase.lower())}(?!\w)", text.lower()))
+
+
+def role_evidence(job: Job, role: str) -> MatchEvidence | None:
+    title = " ".join(job.title.lower().split())
+    patterns = ROLE_PATTERNS.get(role)
+    if patterns:
+        for pattern in patterns:
+            match = re.search(pattern, title, re.I)
+            if match:
+                return MatchEvidence(
+                    kind="role",
+                    value=role,
+                    detail=f"title matched '{match.group(0)}'",
+                    weight=0.15,
+                )
+        return None
+    if _contains_phrase(title, role):
+        return MatchEvidence(kind="role", value=role, detail=f"title matched '{role}'", weight=0.12)
+    return None
+
+
+def hard_violations(job: Job, preferences: Preferences) -> list[str]:
     text = job_text(job).lower()
-    out: list[str] = []
+    violations: list[str] = []
 
-    if p.countries:
-        allowed = {x.lower() for x in p.countries}
-        if job.country:
-            if job.country.lower() not in allowed:
-                out.append("country")
-        elif p.locations:
-            # Unknown country is unsafe when the candidate explicitly constrained geography.
-            if not any(loc.lower() in job.location.lower() for loc in p.locations):
-                out.append("country_unknown")
-        elif "india" in allowed and job.location:
-            india_loc = any(x in job.location.lower() for x in [
-                "india","bengaluru","bangalore","pune","hyderabad","gurugram","gurgaon",
-                "mumbai","noida","chennai","delhi","ahmedabad","indore","jaipur","kochi"
-            ])
-            if not india_loc:
-                out.append("country_unknown")
+    if preferences.countries:
+        allowed = {country.casefold() for country in preferences.countries}
+        if not job.country:
+            violations.append("country_unknown")
+        elif job.country.casefold() not in allowed:
+            violations.append("country")
 
-    if p.paid_only and any(x in text for x in ["unpaid","no stipend"]):
-        out.append("unpaid")
+    if preferences.locations:
+        location_match = bool(job.location) and any(
+            location.casefold() in job.location.casefold() for location in preferences.locations
+        )
+        remote_match = preferences.remote_ok and job.remote_policy == "remote"
+        if not location_match and not remote_match:
+            violations.append("location_unknown" if not job.location else "location")
 
-    if p.max_required_experience_years is not None and job.min_experience_years is not None:
-        if job.min_experience_years > p.max_required_experience_years:
-            out.append("experience")
+    if preferences.paid_only and any(phrase in text for phrase in ["unpaid", "no stipend", "without stipend"]):
+        violations.append("unpaid")
 
-    if not p.remote_ok and job.remote_policy == "remote":
-        out.append("remote_policy")
-    if not p.onsite_ok and job.remote_policy == "onsite":
-        out.append("onsite_policy")
+    if preferences.min_salary_lpa is not None:
+        known_lpa = salary_min_lpa(job)
+        if known_lpa is not None and known_lpa < preferences.min_salary_lpa:
+            violations.append("salary")
 
-    for term in p.avoid_terms:
-        if term.lower() in text:
-            out.append(f"avoid:{term}")
+    if preferences.max_required_experience_years is not None and job.min_experience_years is not None:
+        if job.min_experience_years > preferences.max_required_experience_years:
+            violations.append("experience")
 
-    return out
+    if not preferences.remote_ok and job.remote_policy == "remote":
+        violations.append("remote_policy")
+    if not preferences.onsite_ok:
+        if job.remote_policy == "onsite":
+            violations.append("onsite_policy")
+        elif job.remote_policy == "unknown":
+            violations.append("remote_policy_unknown")
 
-
-def _role_fit(job: Job, role: str) -> bool:
-    title = job.title.lower()
-    desc = job.description.lower()
-    role_low = role.lower()
-
-    if role_low == "computer vision":
-        return "computer vision" in title or any(x in title for x in ["vision engineer","perception engineer"])
-    if role_low == "backend":
-        return any(x in title for x in ["backend","back-end","software engineer","full stack","full-stack"])
-    if role_low == "ai/ml":
-        return any(x in title for x in ["ai","ml","machine learning","deep learning","research engineer","research scientist"])
-    if role_low == "software engineering":
-        return any(x in title for x in ["software engineer","developer","full stack","full-stack"])
-    if role_low == "data engineering":
-        return "data engineer" in title
-    if role_low == "data science":
-        return any(x in title for x in ["data scientist","data science"])
-    if role_low == "qa":
-        return any(x in title for x in ["qa","test engineer","quality assurance"])
-
-    return role_low in title or role_low in desc
+    for term in preferences.avoid_terms:
+        if _contains_phrase(text, term):
+            violations.append(f"avoid:{term}")
+    return violations
 
 
-def evidence(job: Job, p: Preferences) -> tuple[list[str], list[str], float]:
+def evidence(job: Job, preferences: Preferences) -> tuple[list[str], list[str], float, list[MatchEvidence]]:
     text = job_text(job).lower()
-    reasons: list[str] = []
+    items: list[MatchEvidence] = []
     risks: list[str] = []
-    bonus = 0.0
 
-    for role in p.roles:
-        if _role_fit(job, role):
-            reasons.append(f"role aligns with {role}")
-            bonus += 0.12
+    for role in preferences.roles:
+        item = role_evidence(job, role)
+        if item:
+            items.append(item)
 
-    if p.locations and job.location:
-        if any(loc.lower() in job.location.lower() for loc in p.locations):
-            reasons.append(f"location matches {job.location}")
-            bonus += 0.10
+    if preferences.locations and job.location:
+        for location in preferences.locations:
+            if location.casefold() in job.location.casefold():
+                items.append(MatchEvidence(
+                    kind="location", value=location,
+                    detail=f"location matched '{job.location}'", weight=0.10,
+                ))
+                break
 
-    if p.remote_ok and job.remote_policy == "remote":
-        reasons.append("remote option matches preference")
-        bonus += 0.05
+    if preferences.remote_ok and job.remote_policy == "remote":
+        items.append(MatchEvidence(
+            kind="remote_policy", value="remote",
+            detail="job is explicitly marked remote", weight=0.05,
+        ))
 
-    for term in p.prefer_terms:
-        if term.lower() in text:
-            reasons.append(f"contains preferred term: {term}")
-            bonus += 0.03
+    for term in preferences.prefer_terms:
+        if _contains_phrase(text, term):
+            items.append(MatchEvidence(
+                kind="preferred_term", value=term,
+                detail=f"job contains preferred term '{term}'", weight=0.03,
+            ))
 
-    if job.min_experience_years is not None and p.max_required_experience_years is not None:
-        if job.min_experience_years <= p.max_required_experience_years:
-            reasons.append("experience floor is within preference")
-        else:
-            risks.append(f"requires at least {job.min_experience_years:g} years")
-
-    if not job.location:
-        risks.append("location metadata missing")
-    if job.remote_policy == "unknown":
-        risks.append("remote policy not verified")
-    if not job.salary_text:
+    known_lpa = salary_min_lpa(job)
+    if preferences.min_salary_lpa is not None:
+        if known_lpa is None:
+            risks.append("salary not disclosed or not comparable")
+        elif known_lpa >= preferences.min_salary_lpa:
+            items.append(MatchEvidence(
+                kind="salary", value=f"{known_lpa:g} LPA",
+                detail=f"salary meets minimum {preferences.min_salary_lpa:g} LPA", weight=0.08,
+            ))
+    elif not job.salary_text:
         risks.append("salary not disclosed")
 
-    return reasons, risks, bonus
+    if preferences.max_required_experience_years is not None:
+        if job.min_experience_years is None:
+            risks.append("experience requirement not verified")
+        elif job.min_experience_years <= preferences.max_required_experience_years:
+            items.append(MatchEvidence(
+                kind="experience", value=f"{job.min_experience_years:g} years",
+                detail="experience floor is within preference", weight=0.04,
+            ))
+
+    if job.remote_policy == "unknown":
+        risks.append("remote policy not verified")
+    reasons = [item.detail for item in items]
+    return reasons, risks, sum(item.weight for item in items), items
 
 
 def rank_jobs(
     jobs: list[Job],
-    p: Preferences,
+    preferences: Preferences,
     query: str = "",
     top_k: int = 10,
     rejected_ids: set[str] | None = None,
@@ -146,22 +201,20 @@ def rank_jobs(
     for job in jobs:
         if job.stable_id in rejected_ids:
             continue
-        violations = hard_violations(job, p)
-        reasons, risks, bonus = evidence(job, p)
-
-        # When a user has explicitly selected role families, require at least one
-        # of those role families to match the title. This prevents generic company
-        # boilerplate from pushing unrelated roles into the result set.
-        role_reasons = [r for r in reasons if r.startswith("role aligns with ")]
-        if p.roles and not role_reasons:
-            continue
-
-        score = lexical_score(job, p, query) + bonus - 0.35 * len(violations)
-
-        # Hard constraints are exclusion rules, not merely ranking penalties.
+        violations = hard_violations(job, preferences)
         if violations:
             continue
-        matches.append(Match(job=job, score=round(score,4), reasons=reasons, risks=risks, hard_violations=[]))
-
-    matches.sort(key=lambda m: (-m.score, m.job.title.lower()))
+        reasons, risks, bonus, structured_evidence = evidence(job, preferences)
+        if preferences.roles and not any(item.kind == "role" for item in structured_evidence):
+            continue
+        score = lexical_score(job, preferences, query) + bonus
+        matches.append(Match(
+            job=job,
+            score=round(score, 4),
+            reasons=reasons,
+            risks=risks,
+            hard_violations=[],
+            evidence=structured_evidence,
+        ))
+    matches.sort(key=lambda match: (-match.score, match.job.title.casefold()))
     return matches[:top_k]

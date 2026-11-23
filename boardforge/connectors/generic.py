@@ -27,8 +27,10 @@ class GenericJsonLdConnector(JobConnector):
     kind = "generic"
 
     async def fetch(self, source: SourceRef) -> list[Job]:
-        async with httpx.AsyncClient(timeout=20, follow_redirects=True, headers={"User-Agent":"BoardForge/0.2"}) as client:
+        async with httpx.AsyncClient(timeout=20, follow_redirects=False, headers={"User-Agent":"BoardForge/0.2"}) as client:
             r = await client.get(source.board_url)
+        if r.is_redirect:
+            raise ConnectorError("Generic connector redirects are not followed for SSRF safety")
         if r.status_code != 200:
             raise ConnectorError(f"Generic fetch failed: {r.status_code}")
 

@@ -1,6 +1,6 @@
 [project]
 name = "boardforge"
-version = "0.2.0"
+version = "0.3.0"
 description = "Self-learning job intelligence infrastructure with ATS connectors, temporal indexing, personalization and evals."
 requires-python = ">=3.11"
 dependencies = [
@@ -16,3 +16,6 @@ dev = ["pytest>=8.3,<9", "pytest-cov>=6,<7"]
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+
+[tool.setuptools.package-data]
+boardforge = ["data/*.json"]

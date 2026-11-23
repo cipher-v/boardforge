@@ -4,6 +4,7 @@ import json
 from typing import Any, Iterable
 
 from boardforge.discovery.manifest import ConnectorManifest, FieldMap
+from boardforge.security import UnsafeUrlError, has_sensitive_query, validate_public_url
 
 
 TITLE_KEYS = ["title","name","jobTitle","positionTitle"]
@@ -91,6 +92,22 @@ def discover_from_har(har: dict, min_confidence: float = 0.55) -> list[Connector
         mime = str(content.get("mimeType") or "").lower()
         text = content.get("text")
 
+        endpoint = request.get("url") or ""
+        method = (request.get("method") or "GET").upper()
+        header_names = {
+            str(header.get("name", "")).casefold()
+            for header in request.get("headers", [])
+            if isinstance(header, dict)
+        }
+        if method != "GET" or header_names & {"authorization", "cookie", "proxy-authorization", "x-api-key"}:
+            continue
+        if has_sensitive_query(endpoint):
+            continue
+        try:
+            validate_public_url(endpoint, resolve_dns=False)
+        except UnsafeUrlError:
+            continue
+
         if not text or ("json" not in mime and not str(text).lstrip().startswith(("{","["))):
             continue
 
@@ -104,8 +121,6 @@ def discover_from_har(har: dict, min_confidence: float = 0.55) -> list[Connector
             score, fields, evidence = _score(sample)
             if fields is None or score < min_confidence:
                 continue
-            endpoint = request.get("url") or ""
-            method = (request.get("method") or "GET").upper()
             out.append(ConnectorManifest(
                 name=f"learned-{len(out)+1}",
                 endpoint=endpoint,

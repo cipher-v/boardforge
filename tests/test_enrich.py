@@ -1,4 +1,4 @@
-from boardforge.enrich import enrich_job
+from boardforge.enrich import enrich_job, infer_country, salary_min_lpa
 from boardforge.models import Job
 
 
@@ -14,3 +14,19 @@ def test_infers_india_remote_and_experience():
     assert j.remote_policy == "remote"
     assert j.min_experience_years == 0
     assert j.max_experience_years == 2
+
+
+def test_country_inference_uses_location_not_description_substrings():
+    j = enrich_job(base(location="London", description="Great candidate capabilities"))
+    assert j.country == ""
+    assert infer_country("San Mateo, CA") == "USA"
+    assert infer_country("Bengaluru, India") == "India"
+
+
+def test_parses_lpa_and_monthly_inr_salary():
+    annual = enrich_job(base(description="Compensation is 8-12 LPA"))
+    assert salary_min_lpa(annual) == 8
+    assert annual.salary_max == 1_200_000
+
+    monthly = enrich_job(base(description="Stipend: ₹75,000 per month"))
+    assert salary_min_lpa(monthly) == 9

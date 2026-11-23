@@ -1,6 +1,6 @@
 # BoardForge
 
-BoardForge is a self-learning job intelligence backend built around a simple idea:
+BoardForge is an evaluation-first job intelligence backend with assisted connector discovery, built around a simple idea:
 
 > job search systems should understand changing preferences, track changing job boards, and explain recommendations with evidence.
 
@@ -12,12 +12,13 @@ It is intentionally not another generic RAG demo or auto-apply bot.
 - Fetches live jobs from Greenhouse, Lever and Ashby
 - Falls back to JSON-LD JobPosting extraction for generic career pages
 - Normalizes jobs into one schema
-- Tracks first-seen, last-seen, updates and closures in SQLite
+- Tracks sync runs and job discovery, update, closure and reopening events in SQLite
 - Stores persistent candidate preferences and explicit feedback
-- Filters hard constraints before ranking
-- Produces evidence-backed reasons and risk flags
+- Normalizes INR salary ranges and conservative geography metadata
+- Filters hard constraints before ranking and rejects unknown geography when required
+- Produces structured evidence-backed reasons and risk flags
 - Exposes sync, preference, search, feedback and agent APIs
-- Includes ranking/stability evaluation utilities and CI tests
+- Includes an executable starter benchmark, ranking/stability metrics and CI tests
 - Optionally uses an OpenAI-compatible model for structured preference extraction
 
 ## Why this exists
@@ -51,7 +52,7 @@ canonical Job schema
    |
    v
 temporal SQLite index
-(first_seen / last_seen / active / closed / content hash)
+(sync runs / missing observations / lifecycle events / content hash)
    |
    +----------------------+
    |                      |
@@ -60,7 +61,7 @@ preferences + feedback    |
    +-----------> ranker <-+
                   |
                   v
-      reasons + risks + violations
+       structured evidence + risks
                   |
                   v
              API / agent
@@ -171,7 +172,7 @@ The LLM is intentionally kept at the probabilistic boundary. Ingestion, persiste
 
 ## Temporal intelligence
 
-The same source is synced repeatedly. BoardForge records first-seen time, last observation, content changes, disappearance from the source, and active/closed state.
+The same source is synced repeatedly. BoardForge records first-seen time, last observation, content changes, disappearance from the source, and active/closed state. Jobs close only after two consecutive successful observations in which they are absent. Empty or abnormally shrunken source responses are rejected rather than interpreted as mass closures.
 
 This lets the system answer a more useful question than “what jobs exist?”:
 
@@ -179,7 +180,7 @@ This lets the system answer a more useful question than “what jobs exist?”:
 
 ## Evaluation
 
-Current utilities include Precision@K, Recall@K, NDCG@K, hard-constraint violation rate, explanation evidence coverage, and Jaccard@K for paraphrase stability.
+Run `python -m boardforge.cli benchmark` for per-case predictions, Precision@K, Recall@K, NDCG@K and forbidden-result rate. The bundled six-case fixture is deliberately small and exists as a reproducible regression baseline, not as a claim of production quality.
 
 See [docs/evaluation.md](docs/evaluation.md).
 
@@ -194,20 +195,18 @@ See [docs/evaluation.md](docs/evaluation.md).
 
 ## Next major milestone
 
-Unknown-site learning:
+Planned production milestones:
 
-1. open a public careers page in an instrumented browser
-2. observe public XHR/fetch traffic
-3. identify the job-list endpoint and response schema
-4. generate a reusable connector manifest
-5. validate connector output against the browser-visible job count
-6. reuse the connector without browser automation on future syncs
+1. persistent hybrid full-text/vector retrieval
+2. a larger labeled ranking and agent-tool benchmark
+3. scheduled source synchronization and operational telemetry
+4. automatic validation of learned manifests against browser-visible counts
 
 The project explicitly excludes authentication bypass and protected/private API access.
 
 ## Interview story
 
-> I wanted to build job-search infrastructure rather than another matching demo. I started with live ATS ingestion and a temporal index so the system knows when jobs appear, change or close. Candidate preferences and feedback are persistent, hard constraints are deterministic, and ranking produces evidence plus risk flags. The next step is learning connectors for unknown public career sites from browser-observed network traffic and evaluating the whole pipeline for freshness, constraint violations, ranking quality and stability.
+> I wanted to build job-search infrastructure rather than another matching demo. BoardForge ingests live ATS data, records lifecycle events, refuses unsafe mass-closure syncs, remembers candidate constraints, and returns structured evidence for every match. HAR-assisted discovery produces reusable declarative connectors without executing generated code. A reproducible benchmark makes ranking changes measurable rather than anecdotal.
 
 
 ## Learn an unknown public career site from a browser HAR
@@ -231,4 +230,4 @@ Inspect the generated manifest, then sync it:
 python -m boardforge.cli sync-manifest connector-manifests.json --index 0
 ```
 
-Only public GET endpoints are executed by learned manifests. Captured authenticated/private endpoints are intentionally outside the project scope.
+Only public GET endpoints are executed by learned manifests. HAR entries with authentication, cookies, API keys or sensitive query parameters are ignored. Private/local network targets and redirects are rejected.

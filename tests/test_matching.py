@@ -1,4 +1,4 @@
-from boardforge.matching import hard_violations, rank_jobs
+from boardforge.matching import hard_violations, rank_jobs, role_evidence
 from boardforge.models import Job, Preferences
 
 
@@ -58,3 +58,38 @@ def test_clean_match_ranks_before_violation():
     ranked = rank_jobs([bad, good], p)
     assert [m.job.external_id for m in ranked] == ["1"]
     assert not ranked[0].hard_violations
+
+
+def test_role_matching_uses_title_phrases_not_substrings():
+    assert role_evidence(job("retail", "Retail Engineer"), "AI/ML") is None
+    assert role_evidence(job("email", "Email Developer"), "AI/ML") is None
+    assert role_evidence(job("llm", "LLM Engineer"), "AI/ML") is not None
+    assert role_evidence(job("rag", "RAG Engineer"), "AI/ML") is not None
+    assert role_evidence(job("cv", "Computer Vision Engineer"), "Computer Vision") is not None
+
+
+def test_role_profile_excludes_location_only_matches():
+    p = Preferences(roles=["AI/ML"], locations=["Bengaluru"], countries=["India"])
+    relevant = job("1", "LLM Engineer")
+    relevant.location = "Bengaluru"
+    irrelevant = job("2", "UI/UX Designer")
+    irrelevant.location = "Bengaluru"
+    ranked = rank_jobs([irrelevant, relevant], p)
+    assert [match.job.external_id for match in ranked] == ["1"]
+    assert ranked[0].evidence[0].kind == "role"
+
+
+def test_unknown_country_is_excluded_for_country_constraint():
+    p = Preferences(countries=["India"])
+    unknown = job("unknown", "Software Engineer", country="")
+    assert "country_unknown" in hard_violations(unknown, p)
+    assert rank_jobs([unknown], p) == []
+
+
+def test_known_salary_below_minimum_is_excluded():
+    p = Preferences(countries=["India"], min_salary_lpa=12)
+    underpaid = job("low", "Software Engineer")
+    underpaid.salary_currency = "INR"
+    underpaid.salary_min = 900_000
+    underpaid.salary_period = "year"
+    assert "salary" in hard_violations(underpaid, p)

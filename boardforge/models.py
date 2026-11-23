@@ -6,6 +6,8 @@ from pydantic import BaseModel, Field, HttpUrl
 
 
 RemotePolicy = Literal["onsite", "hybrid", "remote", "unknown"]
+SalaryPeriod = Literal["hour", "month", "year", "unknown"]
+MatchStatus = Literal["recommended", "needs_verification"]
 
 
 class SourceRef(BaseModel):
@@ -27,6 +29,10 @@ class Job(BaseModel):
     apply_url: str = ""
     employment_type: str = ""
     salary_text: str = ""
+    salary_currency: str = ""
+    salary_min: float | None = None
+    salary_max: float | None = None
+    salary_period: SalaryPeriod = "unknown"
     min_experience_years: float | None = None
     max_experience_years: float | None = None
     tags: list[str] = Field(default_factory=list)
@@ -41,7 +47,7 @@ class Job(BaseModel):
 class Preferences(BaseModel):
     roles: list[str] = Field(default_factory=list)
     locations: list[str] = Field(default_factory=list)
-    countries: list[str] = Field(default_factory=lambda: ["India"])
+    countries: list[str] = Field(default_factory=list)
     remote_ok: bool = True
     onsite_ok: bool = True
     min_salary_lpa: float | None = None
@@ -52,12 +58,21 @@ class Preferences(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class MatchEvidence(BaseModel):
+    kind: str
+    value: str
+    detail: str
+    weight: float = 0.0
+
+
 class Match(BaseModel):
     job: Job
     score: float
+    status: MatchStatus = "recommended"
     reasons: list[str]
     risks: list[str]
     hard_violations: list[str]
+    evidence: list[MatchEvidence] = Field(default_factory=list)
 
 
 class SyncSummary(BaseModel):
@@ -68,6 +83,8 @@ class SyncSummary(BaseModel):
     updated: int
     unchanged: int
     closed: int
+    missing: int = 0
+    run_id: int | None = None
 
 
 class SearchRequest(BaseModel):

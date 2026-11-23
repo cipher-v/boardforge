@@ -21,26 +21,53 @@ ROLE_MAP = {
 }
 
 CITIES = ["bengaluru","bangalore","pune","hyderabad","gurugram","gurgaon","mumbai","noida","chennai","delhi"]
+NEGATION_RE = re.compile(r"\b(?:do not|don't|dont|avoid|exclude|remove|stop showing|not interested in|no)\b")
+
+
+def _is_negated(text: str, start: int) -> bool:
+    prefix = text[max(0, start - 60):start]
+    # Only consider the current clause so "not QA, but AI" still adds AI.
+    clause = re.split(r"[.;]|\bbut\b|\bhowever\b", prefix)[-1]
+    return bool(NEGATION_RE.search(clause))
+
+
+def _append_unique(values: list[str], value: str) -> None:
+    if value not in values:
+        values.append(value)
+
+
+def _reconcile(preferences: Preferences) -> Preferences:
+    avoided = {term.casefold() for term in preferences.avoid_terms}
+    excluded_roles = {
+        canonical
+        for raw, canonical in ROLE_MAP.items()
+        if raw.casefold() in avoided or canonical.casefold() in avoided
+    }
+    preferences.roles = [role for role in preferences.roles if role not in excluded_roles]
+    return preferences
 
 
 def deterministic_extract(text: str, current: Preferences | None = None) -> Preferences:
     p = (current or Preferences()).model_copy(deep=True)
     low = text.lower()
 
-    if any(x in low for x in ["don't show", "do not show", "avoid", "not interested"]):
-        for term in ["qa","sales","hardware","embedded","unpaid"]:
-            if term in low and term not in p.avoid_terms:
-                p.avoid_terms.append(term)
-
     for raw, canonical in ROLE_MAP.items():
-        if re.search(rf"\b{re.escape(raw)}\b", low) and canonical not in p.roles:
-            p.roles.append(canonical)
+        for match in re.finditer(rf"\b{re.escape(raw)}\b", low):
+            if _is_negated(low, match.start()):
+                p.roles = [role for role in p.roles if role != canonical]
+                _append_unique(p.avoid_terms, raw)
+            else:
+                _append_unique(p.roles, canonical)
+
+    for term in ["sales", "hardware", "embedded", "unpaid"]:
+        match = re.search(rf"\b{re.escape(term)}\b", low)
+        if match and _is_negated(low, match.start()):
+            _append_unique(p.avoid_terms, term)
 
     for city in CITIES:
         if city in low:
             canonical = "Bengaluru" if city in {"bangalore","bengaluru"} else "Gurugram" if city in {"gurgaon","gurugram"} else city.title()
-            if canonical not in p.locations:
-                p.locations.append(canonical)
+            _append_unique(p.locations, canonical)
 
     m = re.search(r"(\d+(?:\.\d+)?)\s*(?:lpa|lakhs?|lakh)", low)
     if m:
@@ -70,7 +97,7 @@ def deterministic_extract(text: str, current: Preferences | None = None) -> Pref
     if "worldwide" in low or "any country" in low:
         p.countries = []
 
-    return p
+    return _reconcile(p)
 
 
 class LLMPreferenceExtractor:
@@ -107,4 +134,4 @@ class LLMPreferenceExtractor:
             )
         r.raise_for_status()
         content = r.json()["choices"][0]["message"]["content"]
-        return Preferences.model_validate_json(content)
+        return _reconcile(Preferences.model_validate_json(content))

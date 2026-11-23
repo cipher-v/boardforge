@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from boardforge.agent import JobAgent
+from boardforge.benchmark import run_benchmark
 from boardforge.discovery.har import discover_from_har
 from boardforge.discovery.manifest import ConnectorManifest
 from boardforge.connectors.manifest import fetch_manifest
@@ -37,7 +38,16 @@ def main() -> None:
     p_manifest.add_argument("manifest_file")
     p_manifest.add_argument("--index", type=int, default=0)
 
+    p_benchmark = sub.add_parser("benchmark")
+    p_benchmark.add_argument("--dataset", default=None)
+    p_benchmark.add_argument("--top-k", type=int, default=5)
+
     args = parser.parse_args()
+    if args.cmd == "benchmark":
+        out = run_benchmark(args.dataset, args.top_k) if args.dataset else run_benchmark(top_k=args.top_k)
+        print(json.dumps(out, indent=2, default=str))
+        return
+
     store = Store()
     agent = JobAgent(store)
 
@@ -57,14 +67,13 @@ def main() -> None:
             encoding="utf-8",
         )
         out = {"discovered":len(manifests),"output":args.out,"manifests":[m.model_dump() for m in manifests]}
-    else:
+    elif args.cmd == "sync-manifest":
         raw = json.loads(Path(args.manifest_file).read_text(encoding="utf-8"))
         item = raw[args.index] if isinstance(raw, list) else raw
         manifest = ConnectorManifest.model_validate(item)
         jobs = asyncio.run(fetch_manifest(manifest))
         summary = store.upsert_source_jobs("learned", manifest.name, jobs)
         out = summary.model_dump()
-
     print(json.dumps(out, indent=2, default=str))
 
 
