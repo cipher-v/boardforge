@@ -19,7 +19,13 @@ def run_benchmark(path: str | Path = DEFAULT_PATH, top_k: int = 5) -> dict[str, 
 
     for case in payload["cases"]:
         preferences = Preferences.model_validate(case["preferences"])
-        matches = rank_jobs(jobs, preferences, query=case.get("query", ""), top_k=top_k)
+        matches = rank_jobs(
+            jobs,
+            preferences,
+            query=case.get("query", ""),
+            top_k=top_k,
+            rejected_ids=set(case.get("rejected_ids", [])),
+        )
         predicted = [match.job.external_id for match in matches]
         relevant = set(case["relevant_ids"])
         forbidden = set(case["forbidden_ids"])
