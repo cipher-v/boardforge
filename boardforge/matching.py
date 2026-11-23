@@ -228,5 +228,11 @@ def rank_jobs(
             hard_violations=[],
             evidence=structured_evidence,
         ))
-    matches.sort(key=lambda match: (-match.score, match.job.title.casefold()))
+    matches.sort(
+        key=lambda match: (
+            match.status == "needs_verification",
+            -match.score,
+            match.job.title.casefold(),
+        )
+    )
     return matches[:top_k]
