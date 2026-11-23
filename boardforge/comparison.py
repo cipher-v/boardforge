@@ -18,7 +18,8 @@ DEFAULT_PATH = Path(__file__).resolve().parent / "data" / "benchmark_v2.json"
 def _lexical_only(
     jobs: list[Job], preferences: Preferences, query: str, top_k: int, rejected_ids: set[str]
 ) -> list[Match]:
-    candidates = [job for job in jobs if job.stable_id not in rejected_ids]
+    # Baseline intentionally has no personalization memory.
+    candidates = list(jobs)
     ranked = sorted(
         candidates,
         key=lambda job: (-lexical_score(job, preferences, query), job.title.casefold()),
@@ -35,7 +36,8 @@ def _constrained_lexical(
 ) -> list[Match]:
     candidates: list[Job] = []
     for job in jobs:
-        if job.stable_id in rejected_ids or hard_violations(job, preferences):
+        # Constrained lexical adds correctness gates but still has no feedback memory.
+        if hard_violations(job, preferences):
             continue
         if preferences.roles and not any(role_evidence(job, role) for role in preferences.roles):
             continue
