@@ -9,7 +9,7 @@ from boardforge.matching import rank_jobs
 from boardforge.models import Job, Preferences
 
 
-DEFAULT_PATH = Path(__file__).resolve().parent / "data" / "benchmark.json"
+DEFAULT_PATH = Path(__file__).resolve().parent / "data" / "benchmark_v2.json"
 
 
 def run_benchmark(path: str | Path = DEFAULT_PATH, top_k: int = 5) -> dict[str, Any]:
