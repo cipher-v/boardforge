@@ -14,7 +14,7 @@ from boardforge.tool_agent import TOOLS
 DEFAULT_PATH = Path(__file__).resolve().parent / "data" / "agent_tools.json"
 
 SEARCH_CUES = re.compile(
-    r"\b(find|search|show|matches?|openings?|jobs?|roles?|alternatives?|anything|what matches|similar)\b",
+    r"\b(find|search|show|openings?|alternatives?|anything|what matches|what are|any good|similar)\b",
     re.I,
 )
 PREFERENCE_CUES = re.compile(
