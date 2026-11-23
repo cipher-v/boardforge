@@ -149,7 +149,10 @@ def rank_jobs(
         violations = hard_violations(job, p)
         reasons, risks, bonus = evidence(job, p)
         score = lexical_score(job, p, query) + bonus - 0.35 * len(violations)
-        matches.append(Match(job=job, score=round(score,4), reasons=reasons, risks=risks, hard_violations=violations))
+        # Hard constraints are exclusion rules, not merely ranking penalties.
+        if violations:
+            continue
+        matches.append(Match(job=job, score=round(score,4), reasons=reasons, risks=risks, hard_violations=[]))
 
-    matches.sort(key=lambda m: (bool(m.hard_violations), -m.score, m.job.title.lower()))
+    matches.sort(key=lambda m: (-m.score, m.job.title.lower()))
     return matches[:top_k]
