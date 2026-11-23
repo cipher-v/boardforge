@@ -1,0 +1,300 @@
+{
+  "version": "1.0",
+  "description": "40-case tool-selection benchmark for BoardForge agent planning. Evaluates tool sequence only; tools are not executed.",
+  "cases": [
+    {
+      "name": "search_backend",
+      "text": "Find backend roles in India",
+      "expected_tools": [
+        "search_jobs"
+      ]
+    },
+    {
+      "name": "search_ai",
+      "text": "Show me AI/ML jobs",
+      "expected_tools": [
+        "search_jobs"
+      ]
+    },
+    {
+      "name": "search_cv",
+      "text": "Find computer vision roles in Bengaluru",
+      "expected_tools": [
+        "search_jobs"
+      ]
+    },
+    {
+      "name": "search_remote",
+      "text": "Search remote RAG roles",
+      "expected_tools": [
+        "search_jobs"
+      ]
+    },
+    {
+      "name": "search_data",
+      "text": "Find data engineering jobs",
+      "expected_tools": [
+        "search_jobs"
+      ]
+    },
+    {
+      "name": "pref_no_qa",
+      "text": "Do not show QA roles anymore",
+      "expected_tools": [
+        "update_preferences"
+      ]
+    },
+    {
+      "name": "pref_remote_only",
+      "text": "From now on I only want remote roles",
+      "expected_tools": [
+        "update_preferences"
+      ]
+    },
+    {
+      "name": "pref_india",
+      "text": "Only India-based roles from now on",
+      "expected_tools": [
+        "update_preferences"
+      ]
+    },
+    {
+      "name": "pref_salary",
+      "text": "I need at least 12 LPA",
+      "expected_tools": [
+        "update_preferences"
+      ]
+    },
+    {
+      "name": "pref_no_hardware",
+      "text": "Avoid hardware-heavy jobs",
+      "expected_tools": [
+        "update_preferences"
+      ]
+    },
+    {
+      "name": "pref_and_search_1",
+      "text": "Don't show QA anymore. Find backend roles.",
+      "expected_tools": [
+        "update_preferences",
+        "search_jobs"
+      ]
+    },
+    {
+      "name": "pref_and_search_2",
+      "text": "Only remote jobs please, now show me RAG roles",
+      "expected_tools": [
+        "update_preferences",
+        "search_jobs"
+      ]
+    },
+    {
+      "name": "pref_and_search_3",
+      "text": "Avoid embedded work and find AI jobs",
+      "expected_tools": [
+        "update_preferences",
+        "search_jobs"
+      ]
+    },
+    {
+      "name": "pref_and_search_4",
+      "text": "I want Bengaluru only. Search computer vision roles.",
+      "expected_tools": [
+        "update_preferences",
+        "search_jobs"
+      ]
+    },
+    {
+      "name": "pref_and_search_5",
+      "text": "Minimum 10 LPA, show backend jobs",
+      "expected_tools": [
+        "update_preferences",
+        "search_jobs"
+      ]
+    },
+    {
+      "name": "reject_job",
+      "text": "Reject benchmark:v2:ai-llm-blr",
+      "expected_tools": [
+        "record_feedback"
+      ]
+    },
+    {
+      "name": "ignore_job",
+      "text": "Ignore benchmark:v2:designer-blr",
+      "expected_tools": [
+        "record_feedback"
+      ]
+    },
+    {
+      "name": "save_job",
+      "text": "Save benchmark:v2:cv-blr",
+      "expected_tools": [
+        "record_feedback"
+      ]
+    },
+    {
+      "name": "applied_job",
+      "text": "I applied to benchmark:v2:backend-pune",
+      "expected_tools": [
+        "record_feedback"
+      ]
+    },
+    {
+      "name": "interview_job",
+      "text": "Interview for benchmark:v2:ai-rag-remote",
+      "expected_tools": [
+        "record_feedback"
+      ]
+    },
+    {
+      "name": "reject_and_search",
+      "text": "Reject benchmark:v2:ai-llm-blr and show other AI jobs",
+      "expected_tools": [
+        "record_feedback",
+        "search_jobs"
+      ]
+    },
+    {
+      "name": "ignore_and_search",
+      "text": "Ignore benchmark:v2:qa-blr, find more QA roles",
+      "expected_tools": [
+        "record_feedback",
+        "search_jobs"
+      ]
+    },
+    {
+      "name": "save_and_search",
+      "text": "Save benchmark:v2:cv-blr and show similar vision jobs",
+      "expected_tools": [
+        "record_feedback",
+        "search_jobs"
+      ]
+    },
+    {
+      "name": "applied_and_search",
+      "text": "Mark benchmark:v2:backend-pune applied and find other backend roles",
+      "expected_tools": [
+        "record_feedback",
+        "search_jobs"
+      ]
+    },
+    {
+      "name": "interview_and_search",
+      "text": "Mark benchmark:v2:ai-rag-remote as interview and show more RAG jobs",
+      "expected_tools": [
+        "record_feedback",
+        "search_jobs"
+      ]
+    },
+    {
+      "name": "mixed_pref_1",
+      "text": "Not QA, but AI and backend are good",
+      "expected_tools": [
+        "update_preferences"
+      ]
+    },
+    {
+      "name": "mixed_pref_2",
+      "text": "Stop showing sales; find software engineering roles",
+      "expected_tools": [
+        "update_preferences",
+        "search_jobs"
+      ]
+    },
+    {
+      "name": "mixed_pref_3",
+      "text": "No unpaid internships. Search ML roles.",
+      "expected_tools": [
+        "update_preferences",
+        "search_jobs"
+      ]
+    },
+    {
+      "name": "mixed_pref_4",
+      "text": "Worldwide is okay now, show AI jobs",
+      "expected_tools": [
+        "update_preferences",
+        "search_jobs"
+      ]
+    },
+    {
+      "name": "mixed_pref_5",
+      "text": "Onsite only in Pune, find backend roles",
+      "expected_tools": [
+        "update_preferences",
+        "search_jobs"
+      ]
+    },
+    {
+      "name": "search_natural_1",
+      "text": "What are the best Python API jobs for me?",
+      "expected_tools": [
+        "search_jobs"
+      ]
+    },
+    {
+      "name": "search_natural_2",
+      "text": "Any good LLM retrieval openings?",
+      "expected_tools": [
+        "search_jobs"
+      ]
+    },
+    {
+      "name": "search_natural_3",
+      "text": "What matches my profile today?",
+      "expected_tools": [
+        "search_jobs"
+      ]
+    },
+    {
+      "name": "search_natural_4",
+      "text": "Show stronger alternatives",
+      "expected_tools": [
+        "search_jobs"
+      ]
+    },
+    {
+      "name": "search_natural_5",
+      "text": "Anything in computer vision?",
+      "expected_tools": [
+        "search_jobs"
+      ]
+    },
+    {
+      "name": "pref_natural_1",
+      "text": "I changed my mind, Pune is fine too",
+      "expected_tools": [
+        "update_preferences"
+      ]
+    },
+    {
+      "name": "pref_natural_2",
+      "text": "Salary matters less now",
+      "expected_tools": [
+        "update_preferences"
+      ]
+    },
+    {
+      "name": "pref_natural_3",
+      "text": "I am okay with hybrid but not onsite",
+      "expected_tools": [
+        "update_preferences"
+      ]
+    },
+    {
+      "name": "pref_natural_4",
+      "text": "Backend is now a lower priority; focus on AI",
+      "expected_tools": [
+        "update_preferences"
+      ]
+    },
+    {
+      "name": "pref_natural_5",
+      "text": "I don't want internships anymore",
+      "expected_tools": [
+        "update_preferences"
+      ]
+    }
+  ]
+}
