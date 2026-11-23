@@ -11,7 +11,13 @@ _TAGS = ["python", "sql", "llm", "rag", "computer vision", "backend", "machine l
 
 
 def _strip_html(text: str) -> str:
-    decoded = html.unescape(text or "")
+    decoded = text or ""
+    # Greenhouse content can contain nested/double-escaped HTML entities.
+    for _ in range(3):
+        newer = html.unescape(decoded)
+        if newer == decoded:
+            break
+        decoded = newer
     cleaned = re.sub(r"<[^>]+>", " ", decoded)
     cleaned = re.sub(r"\s+", " ", cleaned)
     return cleaned.strip()
