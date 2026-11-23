@@ -32,6 +32,5 @@ class AshbyConnector(JobConnector):
                 apply_url=item.get("applyUrl") or item.get("jobUrl", ""),
                 employment_type=item.get("employmentType", ""),
                 tags=[t for t in ["python","sql","llm","rag","backend","machine learning","computer vision"] if t in lowered],
-                published_at=item.get("publishedAt") if False else None,
             ))
         return jobs
