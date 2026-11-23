@@ -208,3 +208,27 @@ The project explicitly excludes authentication bypass and protected/private API 
 ## Interview story
 
 > I wanted to build job-search infrastructure rather than another matching demo. I started with live ATS ingestion and a temporal index so the system knows when jobs appear, change or close. Candidate preferences and feedback are persistent, hard constraints are deterministic, and ranking produces evidence plus risk flags. The next step is learning connectors for unknown public career sites from browser-observed network traffic and evaluating the whole pipeline for freshness, constraint violations, ranking quality and stability.
+
+
+## Learn an unknown public career site from a browser HAR
+
+BoardForge can infer a reusable connector manifest from a public browser network capture.
+
+1. Open the public careers page in your browser.
+2. Open DevTools -> Network.
+3. Reload the page and export the network log as HAR.
+4. Run:
+
+```bash
+python -m boardforge.cli learn-har careers.har --out connector-manifests.json
+```
+
+BoardForge scans JSON/XHR responses for job-like record sets, scores candidate endpoints, infers the response path and field mapping, and writes reusable manifests.
+
+Inspect the generated manifest, then sync it:
+
+```bash
+python -m boardforge.cli sync-manifest connector-manifests.json --index 0
+```
+
+Only public GET endpoints are executed by learned manifests. Captured authenticated/private endpoints are intentionally outside the project scope.
