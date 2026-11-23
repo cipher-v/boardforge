@@ -6,12 +6,18 @@ import json
 from pathlib import Path
 
 from boardforge.agent import JobAgent
+from boardforge.agent_eval import run_deterministic_tool_eval, run_llm_tool_eval
 from boardforge.benchmark import run_benchmark
+from boardforge.comparison import comparison_markdown, run_comparison, run_embedding_comparison
 from boardforge.discovery.har import discover_from_har
 from boardforge.discovery.manifest import ConnectorManifest
 from boardforge.connectors.manifest import fetch_manifest
 from boardforge.store import Store
 from boardforge.sync import sync_url
+
+
+def _print_json(value) -> None:
+    print(json.dumps(value, indent=2, default=str))
 
 
 def main() -> None:
@@ -42,10 +48,52 @@ def main() -> None:
     p_benchmark.add_argument("--dataset", default=None)
     p_benchmark.add_argument("--top-k", type=int, default=5)
 
+    p_compare = sub.add_parser("compare")
+    p_compare.add_argument("--dataset", default=None)
+    p_compare.add_argument("--top-k", type=int, default=5)
+    p_compare.add_argument("--markdown-out", default=None)
+
+    p_embed = sub.add_parser("compare-embeddings")
+    p_embed.add_argument("--dataset", default=None)
+    p_embed.add_argument("--top-k", type=int, default=5)
+
+    p_agent_eval = sub.add_parser("agent-eval")
+    p_agent_eval.add_argument("--dataset", default=None)
+
+    p_agent_llm = sub.add_parser("agent-eval-llm")
+    p_agent_llm.add_argument("--dataset", default=None)
+
     args = parser.parse_args()
+
     if args.cmd == "benchmark":
         out = run_benchmark(args.dataset, args.top_k) if args.dataset else run_benchmark(top_k=args.top_k)
-        print(json.dumps(out, indent=2, default=str))
+        _print_json(out)
+        return
+
+    if args.cmd == "compare":
+        out = run_comparison(args.dataset, args.top_k) if args.dataset else run_comparison(top_k=args.top_k)
+        if args.markdown_out:
+            Path(args.markdown_out).write_text(comparison_markdown(out), encoding="utf-8")
+        _print_json(out)
+        return
+
+    if args.cmd == "compare-embeddings":
+        out = asyncio.run(
+            run_embedding_comparison(args.dataset, args.top_k)
+            if args.dataset
+            else run_embedding_comparison(top_k=args.top_k)
+        )
+        _print_json(out)
+        return
+
+    if args.cmd == "agent-eval":
+        out = run_deterministic_tool_eval(args.dataset) if args.dataset else run_deterministic_tool_eval()
+        _print_json(out)
+        return
+
+    if args.cmd == "agent-eval-llm":
+        out = asyncio.run(run_llm_tool_eval(args.dataset) if args.dataset else run_llm_tool_eval())
+        _print_json(out)
         return
 
     store = Store()
@@ -66,7 +114,11 @@ def main() -> None:
             json.dumps([m.model_dump() for m in manifests], indent=2),
             encoding="utf-8",
         )
-        out = {"discovered":len(manifests),"output":args.out,"manifests":[m.model_dump() for m in manifests]}
+        out = {
+            "discovered": len(manifests),
+            "output": args.out,
+            "manifests": [m.model_dump() for m in manifests],
+        }
     elif args.cmd == "sync-manifest":
         raw = json.loads(Path(args.manifest_file).read_text(encoding="utf-8"))
         item = raw[args.index] if isinstance(raw, list) else raw
@@ -74,7 +126,7 @@ def main() -> None:
         jobs = asyncio.run(fetch_manifest(manifest))
         summary = store.upsert_source_jobs("learned", manifest.name, jobs)
         out = summary.model_dump()
-    print(json.dumps(out, indent=2, default=str))
+    _print_json(out)
 
 
 if __name__ == "__main__":
