@@ -148,7 +148,16 @@ def rank_jobs(
             continue
         violations = hard_violations(job, p)
         reasons, risks, bonus = evidence(job, p)
+
+        # When a user has explicitly selected role families, require at least one
+        # of those role families to match the title. This prevents generic company
+        # boilerplate from pushing unrelated roles into the result set.
+        role_reasons = [r for r in reasons if r.startswith("role aligns with ")]
+        if p.roles and not role_reasons:
+            continue
+
         score = lexical_score(job, p, query) + bonus - 0.35 * len(violations)
+
         # Hard constraints are exclusion rules, not merely ranking penalties.
         if violations:
             continue
