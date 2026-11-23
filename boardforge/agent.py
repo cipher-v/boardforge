@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from boardforge.models import FeedbackRequest
 from boardforge.preferences import LLMPreferenceExtractor
+from boardforge.semantic import EmbeddingClient, hybrid_rank_jobs
 from boardforge.store import Store
-from boardforge.matching import rank_jobs
 
 
 @dataclass
@@ -14,15 +14,17 @@ class AgentResult:
 
 
 class JobAgent:
-    """Small, explicit tool-using agent facade.
+    """Explicit tools around a persistent, testable job-search core."""
 
-    The LLM is used for structured preference extraction when configured.
-    Search, filtering, feedback and persistence stay deterministic and testable.
-    """
-
-    def __init__(self, store: Store, extractor: LLMPreferenceExtractor | None = None):
+    def __init__(
+        self,
+        store: Store,
+        extractor: LLMPreferenceExtractor | None = None,
+        embeddings: EmbeddingClient | None = None,
+    ):
         self.store = store
         self.extractor = extractor or LLMPreferenceExtractor()
+        self.embeddings = embeddings or EmbeddingClient()
 
     async def update_preferences(self, profile_id: str, text: str) -> AgentResult:
         current = self.store.load_preferences(profile_id)
@@ -32,16 +34,17 @@ class JobAgent:
 
     async def search_jobs(self, profile_id: str, query: str = "", top_k: int = 10) -> AgentResult:
         prefs = self.store.load_preferences(profile_id)
-        matches = rank_jobs(
+        matches = await hybrid_rank_jobs(
             self.store.active_jobs(),
             prefs,
             query=query,
             top_k=top_k,
             rejected_ids=self.store.rejected_job_ids(profile_id),
+            client=self.embeddings,
         )
         return AgentResult(
             f"Found {len(matches)} ranked jobs.",
-            {"matches": [m.model_dump(mode="json") for m in matches]},
+            {"matches":[m.model_dump(mode="json") for m in matches]},
         )
 
     async def record_feedback(self, req: FeedbackRequest) -> AgentResult:
@@ -50,6 +53,6 @@ class JobAgent:
 
     async def handle(self, profile_id: str, text: str, top_k: int = 10) -> AgentResult:
         low = text.lower()
-        if any(x in low for x in ["don't show", "do not show", "prefer", "i want", "avoid", "only", "remote"]):
+        if any(x in low for x in ["don't show","do not show","prefer","i want","avoid","only","remote"]):
             await self.update_preferences(profile_id, text)
         return await self.search_jobs(profile_id, query=text, top_k=top_k)
