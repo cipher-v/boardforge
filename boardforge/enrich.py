@@ -8,6 +8,10 @@ INDIA_CITIES = {
     "bengaluru","bangalore","pune","hyderabad","gurugram","gurgaon","mumbai",
     "noida","chennai","delhi","new delhi","ahmedabad","indore","jaipur","kochi",
 }
+US_HINTS = {
+    "san mateo","pittsburgh","new york","seattle","austin","boston","california",
+    "ca","ny","tx","wa","pa","usa","united states",
+}
 
 
 def enrich_job(job: Job) -> Job:
@@ -17,6 +21,8 @@ def enrich_job(job: Job) -> Job:
     if not j.country:
         if "india" in text or any(city in text for city in INDIA_CITIES):
             j.country = "India"
+        elif any(hint in text for hint in US_HINTS):
+            j.country = "USA"
 
     if j.remote_policy == "unknown":
         if re.search(r"\bremote\b", text):
