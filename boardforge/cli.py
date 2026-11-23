@@ -73,7 +73,9 @@ def main() -> None:
     if args.cmd == "compare":
         out = run_comparison(args.dataset, args.top_k) if args.dataset else run_comparison(top_k=args.top_k)
         if args.markdown_out:
-            Path(args.markdown_out).write_text(comparison_markdown(out), encoding="utf-8")
+            output_path = Path(args.markdown_out)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(comparison_markdown(out), encoding="utf-8")
         _print_json(out)
         return
 
