@@ -38,6 +38,21 @@ def test_postgres_store_migrations_fts_vectors_and_state():
         summary = store.upsert_source_jobs("test", "integration", [backend, vision, sales])
         assert summary.inserted == 3
         assert store.candidate_jobs("Python FastAPI", limit=2)[0].external_id == "backend"
+        india_candidates = store.candidate_jobs(
+            "engineer",
+            limit=10,
+            preferences=Preferences(countries=["India"]),
+        )
+        assert {job.external_id for job in india_candidates} == {"backend", "vision", "sales"}
+        junior_candidates = store.candidate_jobs(
+            "engineer",
+            limit=10,
+            preferences=Preferences(
+                countries=["India"],
+                max_required_experience_years=1,
+            ),
+        )
+        assert {job.external_id for job in junior_candidates} == {"backend", "vision", "sales"}
 
         vector = [0.0] * 768
         vector[0] = 1.0
