@@ -58,6 +58,14 @@ class Preferences(BaseModel):
     notes: list[str] = Field(default_factory=list)
 
 
+class CandidateProfile(BaseModel):
+    skills: list[str] = Field(default_factory=list)
+    role_signals: list[str] = Field(default_factory=list)
+    domains: list[str] = Field(default_factory=list)
+    education: list[str] = Field(default_factory=list)
+    resume_filename: str = ""
+
+
 class MatchEvidence(BaseModel):
     kind: str
     value: str
