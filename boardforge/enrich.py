@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 
+import pycountry
+
 from boardforge.models import Job
 
 
@@ -21,10 +23,63 @@ US_STATE_CODES = {
     "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT",
     "VT", "VA", "WA", "WV", "WI", "WY", "DC",
 }
+US_STATE_NAMES = {
+    "alabama", "alaska", "arizona", "arkansas", "california", "colorado",
+    "connecticut", "delaware", "florida", "georgia", "hawaii", "idaho",
+    "illinois", "indiana", "iowa", "kansas", "kentucky", "louisiana",
+    "maine", "maryland", "massachusetts", "michigan", "minnesota",
+    "mississippi", "missouri", "montana", "nebraska", "nevada",
+    "new hampshire", "new jersey", "new mexico", "new york",
+    "north carolina", "north dakota", "ohio", "oklahoma", "oregon",
+    "pennsylvania", "rhode island", "south carolina", "south dakota",
+    "tennessee", "texas", "utah", "vermont", "virginia", "washington",
+    "west virginia", "wisconsin", "wyoming", "district of columbia",
+}
+COUNTRY_ALIASES = {
+    "south korea": "Korea, Republic of",
+    "north korea": "Korea, Democratic People's Republic of",
+    "russia": "Russian Federation",
+    "vietnam": "Viet Nam",
+    "taiwan": "Taiwan, Province of China",
+    "uk": "United Kingdom",
+    "u.k.": "United Kingdom",
+    "uae": "United Arab Emirates",
+}
+
+
+def _explicit_countries(location: str) -> list[str]:
+    normalized = " ".join(location.casefold().split())
+    found: list[str] = []
+
+    for alias, canonical in COUNTRY_ALIASES.items():
+        if re.search(rf"(?<!\w){re.escape(alias)}(?!\w)", normalized):
+            found.append(canonical)
+
+    for country in pycountry.countries:
+        names = {
+            country.name,
+            getattr(country, "official_name", ""),
+            getattr(country, "common_name", ""),
+        }
+        for name in names:
+            if not name:
+                continue
+            if re.search(
+                rf"(?<!\w){re.escape(name.casefold())}(?!\w)",
+                normalized,
+            ):
+                found.append(country.name)
+                break
+
+    return list(dict.fromkeys(found))
 
 
 def infer_country(location: str) -> str:
-    """Infer country conservatively from the structured location only."""
+    """Infer one country conservatively from the structured location only.
+
+    Multi-country locations intentionally remain unknown because Job.country is
+    currently a single-valued field.
+    """
     normalized = " ".join(location.lower().split())
     if not normalized:
         return ""
@@ -39,7 +94,19 @@ def infer_country(location: str) -> str:
     for code in US_STATE_CODES:
         if re.search(rf",\s*{code}(?:\s|,|$)", location, re.I):
             return "USA"
-    return ""
+    if any(
+        re.search(rf"\b{re.escape(state)}\b", normalized)
+        for state in US_STATE_NAMES
+    ):
+        return "USA"
+
+    explicit = _explicit_countries(location)
+    if len(explicit) != 1:
+        return ""
+    country = explicit[0]
+    if country == "United States":
+        return "USA"
+    return country
 
 
 def _parse_salary(job: Job, text: str) -> None:
