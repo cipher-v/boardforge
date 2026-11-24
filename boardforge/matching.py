@@ -9,6 +9,15 @@ from boardforge.models import Job, Match, MatchEvidence, Preferences
 
 
 WORD_RE = re.compile(r"[a-zA-Z0-9+#.]{2,}")
+QUERY_GENERIC_TOKENS = {
+    "a", "an", "and", "or", "the", "to", "for", "of", "in", "on", "with",
+    "job", "jobs", "role", "roles", "engineer", "engineering", "developer",
+    "software", "senior", "staff", "principal", "lead", "manager",
+    "india", "remote", "onsite", "hybrid", "only", "avoid", "exclude",
+    "requiring", "require", "required", "more", "than", "over", "above",
+    "greater", "at", "most", "max", "maximum", "years", "year", "yrs",
+    "experience", "systems", "system",
+}
 ROLE_PATTERNS: dict[str, tuple[str, ...]] = {
     "AI/ML": (
         r"\bai engineer\b", r"\bml engineer\b", r"\bmachine learning\b",
@@ -71,6 +80,124 @@ def _contains_phrase(text: str, phrase: str) -> bool:
     return bool(re.search(rf"(?<!\w){re.escape(phrase.lower())}(?!\w)", text.lower()))
 
 
+def _generic_engineering_title(title: str) -> bool:
+    return bool(re.search(
+        r"\b(?:software|application|applications|platform)\s+"
+        r"(?:engineer|developer)\b",
+        title,
+        re.I,
+    ))
+
+
+def _description_role_evidence(job: Job, role: str) -> MatchEvidence | None:
+    """Allow specialized work hidden behind generic engineering titles.
+
+    This intentionally requires a generic hands-on engineering title plus
+    substantive role-specific language in the JD. It does not let managers or
+    architects pass merely because their descriptions mention AI or data.
+    """
+    title = " ".join(job.title.lower().split())
+    if not _generic_engineering_title(title):
+        return None
+
+    description = job.description.lower()
+    patterns_by_role: dict[str, tuple[str, ...]] = {
+        "AI/ML": (
+            r"\bmachine learning systems?\b",
+            r"\bllm orchestration\b",
+            r"\bembedding models?\b",
+            r"\bvector stores?\b",
+            r"\bautonomous agents?\b",
+            r"\bagentic ai systems?\b",
+            r"\brag pipelines?\b",
+            r"\bretrieval strategies\b",
+            r"\btransformer models?\b",
+            r"\bcomputer vision\b",
+            r"\bdeep learning\b",
+        ),
+        "Backend": (
+            r"\bbackend (?:services?|systems?)\b",
+            r"\bmicroservices?\b",
+            r"\bservice[- ]oriented architecture\b",
+            r"\bapi development\b",
+            r"\bdistributed systems?\b",
+        ),
+        "Data Engineering": (
+            r"\bdata platform\b",
+            r"\bdata pipelines?\b",
+            r"\bdata lake\b",
+            r"\bdata services?\b",
+            r"\betl\b",
+            r"\bairflow\b",
+        ),
+    }
+    for pattern in patterns_by_role.get(role, ()):
+        match = re.search(pattern, description, re.I)
+        if match:
+            return MatchEvidence(
+                kind="role",
+                value=role,
+                detail=f"description substantiated {role} work via '{match.group(0)}'",
+                weight=0.10,
+            )
+    return None
+
+
+def _query_topic_terms(preferences: Preferences, query: str) -> set[str]:
+    cleaned = query.casefold()
+    for term in [*preferences.countries, *preferences.locations]:
+        if term:
+            cleaned = re.sub(
+                rf"(?<!\w){re.escape(term.casefold())}(?!\w)",
+                " ",
+                cleaned,
+            )
+    cleaned = re.sub(
+        r"\b\d+(?:\.\d+)?\s*(?:lpa|lakhs?|lakh|years?|yrs?)\b",
+        " ",
+        cleaned,
+    )
+    return {
+        token
+        for token in tokens(cleaned)
+        if token not in QUERY_GENERIC_TOKENS and not token.isdigit()
+    }
+
+
+def query_topic_evidence(
+    job: Job,
+    preferences: Preferences,
+    query: str,
+) -> MatchEvidence | None:
+    """Require substantial overlap on meaningful query terms.
+
+    Geography, seniority wording, and generic role words are intentionally
+    ignored so they cannot by themselves make a semantic neighbor look
+    confidently relevant.
+    """
+    terms = _query_topic_terms(preferences, query)
+    if not terms:
+        return None
+
+    document_terms = set(tokens(job_text(job)))
+    matched = sorted(terms & document_terms)
+    required = 1 if len(terms) == 1 else 2 if len(terms) <= 5 else 3
+    if len(matched) < required:
+        return None
+
+    coverage = len(matched) / len(terms)
+    weight = min(0.12, 0.04 + (0.08 * coverage))
+    return MatchEvidence(
+        kind="query_topic",
+        value=", ".join(matched),
+        detail=(
+            f"query topic matched {len(matched)}/{len(terms)} meaningful terms: "
+            + ", ".join(matched)
+        ),
+        weight=weight,
+    )
+
+
 def role_evidence(job: Job, role: str) -> MatchEvidence | None:
     title = " ".join(job.title.lower().split())
     if role == "AI/ML" and re.search(r"\b(?:hardware|embedded|firmware)\b", title, re.I):
@@ -86,7 +213,7 @@ def role_evidence(job: Job, role: str) -> MatchEvidence | None:
                     detail=f"title matched '{match.group(0)}'",
                     weight=0.15,
                 )
-        return None
+        return _description_role_evidence(job, role)
     if _contains_phrase(title, role):
         return MatchEvidence(kind="role", value=role, detail=f"title matched '{role}'", weight=0.12)
     return None
@@ -215,6 +342,11 @@ def rank_jobs(
         if violations:
             continue
         reasons, risks, bonus, structured_evidence = evidence(job, preferences)
+        topic_item = query_topic_evidence(job, preferences, query) if query.strip() else None
+        if topic_item:
+            structured_evidence.append(topic_item)
+            reasons.append(topic_item.detail)
+            bonus += topic_item.weight
         if preferences.roles and not any(item.kind == "role" for item in structured_evidence):
             continue
         score = lexical_score(job, preferences, query) + bonus
