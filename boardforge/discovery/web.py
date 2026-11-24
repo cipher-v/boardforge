@@ -1,20 +1,28 @@
 from __future__ import annotations
 
-import os
 import asyncio
 import hashlib
+import os
 from dataclasses import dataclass
+from typing import Protocol
 from urllib.parse import urlparse
 
 import httpx
 
 from boardforge.connectors.detect import detect_source
-from boardforge.models import CandidateProfile, Preferences, SourceRef
 from boardforge.database import StoreProtocol
+from boardforge.models import CandidateProfile, Preferences, SourceRef
 from boardforge.sync import sync_url
 
 
 SUPPORTED_SEARCH_HOSTS = (
+    "job-boards.greenhouse.io",
+    "boards.greenhouse.io",
+    "jobs.lever.co",
+    "jobs.ashbyhq.com",
+)
+
+TAVILY_DOMAINS = (
     "job-boards.greenhouse.io",
     "boards.greenhouse.io",
     "jobs.lever.co",
@@ -31,9 +39,18 @@ ROLE_TERMS: dict[str, tuple[str, ...]] = {
 }
 
 
+class SearchProvider(Protocol):
+    enabled: bool
+    name: str
+
+    async def search_urls(self, query: str, *, count: int = 20) -> list[str]:
+        ...
+
+
 @dataclass
 class DiscoveryReport:
     enabled: bool
+    provider: str = ""
     searched_queries: int = 0
     discovered_boards: int = 0
     synced_boards: int = 0
@@ -44,6 +61,7 @@ class DiscoveryReport:
     def as_dict(self) -> dict:
         return {
             "enabled": self.enabled,
+            "provider": self.provider,
             "searched_queries": self.searched_queries,
             "discovered_boards": self.discovered_boards,
             "synced_boards": self.synced_boards,
@@ -53,29 +71,70 @@ class DiscoveryReport:
         }
 
 
-class BraveDiscoveryClient:
-    endpoint = "https://api.search.brave.com/res/v1/web/search"
+class TavilyDiscoveryClient:
+    name = "tavily"
+    endpoint = "https://api.tavily.com/search"
 
     def __init__(self, api_key: str | None = None):
-        self.api_key = api_key or os.getenv("BOARDFORGE_BRAVE_API_KEY", "")
-        self.enabled = bool(self.api_key) and os.getenv(
-            "BOARDFORGE_ENABLE_WEB_DISCOVERY", "0"
-        ) == "1"
+        self.api_key = api_key or os.getenv("TAVILY_API_KEY", "")
+        self.enabled = bool(self.api_key)
 
     async def search_urls(self, query: str, *, count: int = 20) -> list[str]:
         if not self.enabled:
             return []
+        payload = {
+            "query": query,
+            "search_depth": "basic",
+            "topic": "general",
+            "max_results": max(1, min(count, 20)),
+            "include_domains": list(TAVILY_DOMAINS),
+            "include_answer": False,
+            "include_raw_content": False,
+            "include_images": False,
+        }
+        async with httpx.AsyncClient(timeout=20) as client:
+            response = await client.post(
+                self.endpoint,
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+        response.raise_for_status()
+        return [
+            item.get("url", "")
+            for item in response.json().get("results", [])
+            if item.get("url")
+        ]
+
+
+class BraveDiscoveryClient:
+    """Legacy/optional search provider retained for provider portability."""
+
+    name = "brave"
+    endpoint = "https://api.search.brave.com/res/v1/web/search"
+
+    def __init__(self, api_key: str | None = None):
+        self.api_key = api_key or os.getenv("BOARDFORGE_BRAVE_API_KEY", "")
+        self.enabled = bool(self.api_key)
+
+    async def search_urls(self, query: str, *, count: int = 20) -> list[str]:
+        if not self.enabled:
+            return []
+        # Brave lacks Tavily's multi-domain request body, so restrict in-query.
+        sites = " OR ".join(f"site:{domain}" for domain in TAVILY_DOMAINS)
         headers = {
             "X-Subscription-Token": self.api_key,
             "Accept": "application/json",
         }
         params = {
-            "q": query,
+            "q": f"({sites}) {query}",
             "count": max(1, min(count, 20)),
             "search_lang": "en",
             "safesearch": "moderate",
         }
-        async with httpx.AsyncClient(timeout=20) as client:
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
             response = await client.get(self.endpoint, headers=headers, params=params)
         response.raise_for_status()
         payload = response.json()
@@ -86,35 +145,50 @@ class BraveDiscoveryClient:
         ]
 
 
+class DisabledSearchProvider:
+    name = "disabled"
+    enabled = False
+
+    async def search_urls(self, query: str, *, count: int = 20) -> list[str]:
+        return []
+
+
+def create_search_provider() -> SearchProvider:
+    provider = os.getenv("BOARDFORGE_SEARCH_PROVIDER", "tavily").strip().casefold()
+    if provider == "tavily":
+        return TavilyDiscoveryClient()
+    if provider == "brave":
+        return BraveDiscoveryClient()
+    if provider in {"none", "disabled", "off"}:
+        return DisabledSearchProvider()
+    raise ValueError(
+        "unsupported BOARDFORGE_SEARCH_PROVIDER; expected tavily, brave, or none"
+    )
+
+
 def _role_phrases(profile: CandidateProfile, prefs: Preferences) -> list[str]:
-    roles = prefs.roles or profile.role_signals
+    roles = prefs.roles or profile.target_roles or profile.role_signals
     phrases: list[str] = []
     for role in roles[:4]:
         phrases.extend(ROLE_TERMS.get(role, (role,)))
     return list(dict.fromkeys(phrases))[:6]
 
 
-def build_discovery_queries(
+def build_discovery_query(
     profile: CandidateProfile,
     prefs: Preferences,
     query: str = "",
-) -> list[str]:
+) -> str:
     intent = query.strip()
     if not intent:
         phrases = _role_phrases(profile, prefs)
-        intent = " OR ".join(f'"{phrase}"' for phrase in phrases) or "software engineer"
+        intent = " OR ".join(f'"{phrase}"' for phrase in phrases) or '"software engineer"'
 
     geo_parts = list(prefs.locations[:3]) + list(prefs.countries[:2])
-    geo = " ".join(dict.fromkeys(geo_parts))
+    geo = " ".join(dict.fromkeys(part.strip() for part in geo_parts if part.strip()))
     if geo:
         intent = f"{intent} {geo}"
-
-    sites = [
-        "site:job-boards.greenhouse.io",
-        "site:jobs.lever.co",
-        "site:jobs.ashbyhq.com",
-    ]
-    return [f"{site} {intent}" for site in sites]
+    return intent
 
 
 def canonical_sources(urls: list[str]) -> list[SourceRef]:
@@ -123,7 +197,10 @@ def canonical_sources(urls: list[str]) -> list[SourceRef]:
     for url in urls:
         try:
             host = urlparse(url).netloc.lower()
-            if not any(host == allowed or host.endswith("." + allowed) for allowed in SUPPORTED_SEARCH_HOSTS):
+            if not any(
+                host == allowed or host.endswith("." + allowed)
+                for allowed in SUPPORTED_SEARCH_HOSTS
+            ):
                 continue
             source = detect_source(url)
             if source.kind not in {"greenhouse", "lever", "ashby"} or not source.key:
@@ -145,37 +222,45 @@ async def discover_and_sync(
     *,
     query: str = "",
     max_boards: int = 8,
-    client: BraveDiscoveryClient | None = None,
+    client: SearchProvider | None = None,
 ) -> DiscoveryReport:
-    client = client or BraveDiscoveryClient()
+    client = client or create_search_provider()
+    provider_name = getattr(client, "name", type(client).__name__)
     if not client.enabled:
         return DiscoveryReport(
             enabled=False,
-            reason="web discovery is disabled; set BOARDFORGE_BRAVE_API_KEY and BOARDFORGE_ENABLE_WEB_DISCOVERY=1",
+            provider=provider_name,
+            reason=(
+                "web discovery is disabled or its API key is missing; "
+                "search uses the existing indexed jobs"
+            ),
         )
 
-    urls: list[str] = []
-    queries = build_discovery_queries(profile, prefs, query)
-    report = DiscoveryReport(enabled=True, searched_queries=len(queries))
-
-    search_results = await asyncio.gather(
-        *(client.search_urls(search_query, count=20) for search_query in queries),
-        return_exceptions=True,
+    discovery_query = build_discovery_query(profile, prefs, query)
+    report = DiscoveryReport(
+        enabled=True,
+        provider=provider_name,
+        searched_queries=1,
     )
-    for result in search_results:
-        if isinstance(result, Exception):
-            report.failures += 1
-        else:
-            urls.extend(result)
+
+    try:
+        urls = await client.search_urls(discovery_query, count=20)
+    except Exception:
+        report.failures += 1
+        urls = []
 
     sources = canonical_sources(urls)[:max_boards]
     report.discovered_boards = len(sources)
     provenance = (
-        "manual:" + hashlib.sha256(" ".join(query.casefold().split()).encode("utf-8")).hexdigest()[:12]
-        if query else "profile-derived"
+        "manual:"
+        + hashlib.sha256(
+            " ".join(query.casefold().split()).encode("utf-8")
+        ).hexdigest()[:12]
+        if query
+        else "profile-derived"
     )
 
-    for source in sources:
+    async def sync_source(source: SourceRef) -> None:
         store.record_discovered_source(
             source.kind, source.key, source.board_url, provenance
         )
@@ -201,4 +286,5 @@ async def discover_and_sync(
                 status="failed",
             )
 
+    await asyncio.gather(*(sync_source(source) for source in sources))
     return report
