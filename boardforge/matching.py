@@ -18,6 +18,18 @@ QUERY_GENERIC_TOKENS = {
     "greater", "at", "most", "max", "maximum", "years", "year", "yrs",
     "experience", "systems", "system",
 }
+ROLE_QUERY_TOKENS: dict[str, set[str]] = {
+    "AI/ML": {
+        "ai", "ml", "machine", "learning", "llm", "genai", "generative",
+        "artificial", "intelligence",
+    },
+    "Computer Vision": {"computer", "vision", "perception", "image", "processing"},
+    "Backend": {"backend", "back", "end"},
+    "Software Engineering": {"software", "engineering", "developer"},
+    "Data Engineering": {"data", "engineering", "etl"},
+    "Data Science": {"data", "science", "scientist"},
+    "QA": {"qa", "test", "testing", "quality", "assurance", "sdet"},
+}
 ROLE_PATTERNS: dict[str, tuple[str, ...]] = {
     "AI/ML": (
         r"\bai engineer\b", r"\bml engineer\b", r"\bmachine learning\b",
@@ -143,7 +155,7 @@ def _description_role_evidence(job: Job, role: str) -> MatchEvidence | None:
     return None
 
 
-def _query_topic_terms(preferences: Preferences, query: str) -> set[str]:
+def query_topic_terms(preferences: Preferences, query: str) -> set[str]:
     cleaned = query.casefold()
     for term in [*preferences.countries, *preferences.locations]:
         if term:
@@ -157,10 +169,17 @@ def _query_topic_terms(preferences: Preferences, query: str) -> set[str]:
         " ",
         cleaned,
     )
+    role_tokens = set().union(
+        *(ROLE_QUERY_TOKENS.get(role, set()) for role in preferences.roles)
+    ) if preferences.roles else set()
     return {
         token
         for token in tokens(cleaned)
-        if token not in QUERY_GENERIC_TOKENS and not token.isdigit()
+        if (
+            token not in QUERY_GENERIC_TOKENS
+            and token not in role_tokens
+            and not token.isdigit()
+        )
     }
 
 
@@ -175,7 +194,7 @@ def query_topic_evidence(
     ignored so they cannot by themselves make a semantic neighbor look
     confidently relevant.
     """
-    terms = _query_topic_terms(preferences, query)
+    terms = query_topic_terms(preferences, query)
     if not terms:
         return None
 
