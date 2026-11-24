@@ -68,7 +68,7 @@ async def upload_resume(
     if not profile.skills and not profile.role_signals and not profile.education:
         raise HTTPException(status_code=400, detail="could not extract a useful profile from this resume")
     store.save_candidate_profile(profile_id, profile)
-    recommendations = await core_agent.search_jobs(profile_id, "", 10)
+    recommendations = await core_agent.recommend_jobs(profile_id, 20)
     return {
         "profile": profile.model_dump(),
         **recommendations.data,
@@ -79,6 +79,12 @@ async def upload_resume(
 def candidate_profile(profile_id: str):
     profile = store.load_candidate_profile(profile_id)
     return {"profile": profile.model_dump() if profile else None}
+
+
+@app.get("/recommendations/{profile_id}")
+async def recommendations(profile_id: str, top_k: int = 20):
+    result = await core_agent.recommend_jobs(profile_id, max(1, min(top_k, 50)))
+    return result.data
 
 
 @app.post("/preferences")
