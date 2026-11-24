@@ -73,6 +73,12 @@ def test_postgres_store_migrations_fts_vectors_and_state():
         assert store.candidate_jobs(
             "backend", limit=2, query_vector=vector, embedding_model="test-model"
         )[0].external_id == "backend"
+        india_embedding_candidates = store.embedding_candidates(
+            "another-model", limit=10, countries=["India"]
+        )
+        assert {job.external_id for job in india_embedding_candidates} == {
+            "backend", "vision", "sales", "senior"
+        }
 
         store.save_preferences("u", Preferences(roles=["Backend"], countries=["India"]))
         store.save_candidate_profile("u", CandidateProfile(skills=["Python"], target_roles=["Backend"]))
