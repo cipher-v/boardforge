@@ -10,7 +10,7 @@ from typing import Protocol
 import httpx
 
 from boardforge.database import StoreProtocol
-from boardforge.matching import job_text, lexical_score, query_text, rank_jobs
+from boardforge.matching import job_text, query_text, rank_jobs
 from boardforge.models import Job, Match, Preferences
 
 
@@ -352,21 +352,20 @@ async def hybrid_rank_jobs(
             rescored.append(match)
             continue
         semantic = cosine(qv, vector)
-        lexical = lexical_score(match.job, prefs, query)
         match.score = round((0.55 * match.score) + (0.45 * semantic), 4)
 
         if semantic > 0.45:
             match.reasons.append(f"semantic similarity score {semantic:.3f}")
 
-        topical_evidence = lexical > 0 or any(
-            item.kind in {"role", "preferred_term"} for item in match.evidence
+        topical_evidence = any(
+            item.kind in {"role", "preferred_term", "query_topic"}
+            for item in match.evidence
         )
         if query.strip() and not topical_evidence:
             match.status = "needs_verification"
-            if "semantic-only relevance; no lexical or role evidence" not in match.risks:
-                match.risks.append(
-                    "semantic-only relevance; no lexical or role evidence"
-                )
+            risk = "semantic-only relevance; no concrete query or role evidence"
+            if risk not in match.risks:
+                match.risks.append(risk)
 
         rescored.append(match)
 
