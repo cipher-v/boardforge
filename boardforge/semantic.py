@@ -10,7 +10,7 @@ from typing import Protocol
 import httpx
 
 from boardforge.database import StoreProtocol
-from boardforge.matching import job_text, query_text, rank_jobs
+from boardforge.matching import job_text, query_text, query_topic_terms, rank_jobs
 from boardforge.models import Job, Match, Preferences
 
 
@@ -357,13 +357,27 @@ async def hybrid_rank_jobs(
         if semantic > 0.45:
             match.reasons.append(f"semantic similarity score {semantic:.3f}")
 
-        topical_evidence = any(
-            item.kind in {"role", "preferred_term", "query_topic"}
-            for item in match.evidence
+        has_role_evidence = any(
+            item.kind == "role" for item in match.evidence
         )
-        if query.strip() and not topical_evidence:
+        has_query_topic_evidence = any(
+            item.kind in {"preferred_term", "query_topic"} for item in match.evidence
+        )
+        specific_topic_terms = query_topic_terms(prefs, query) if query.strip() else set()
+        confidence_gap = (
+            bool(specific_topic_terms) and not has_query_topic_evidence
+        ) or (
+            not specific_topic_terms
+            and not has_role_evidence
+            and not has_query_topic_evidence
+        )
+        if query.strip() and confidence_gap:
             match.status = "needs_verification"
-            risk = "semantic-only relevance; no concrete query or role evidence"
+            risk = (
+                "query-specific relevance not verified"
+                if specific_topic_terms
+                else "semantic-only relevance; no concrete query or role evidence"
+            )
             if risk not in match.risks:
                 match.risks.append(risk)
 
