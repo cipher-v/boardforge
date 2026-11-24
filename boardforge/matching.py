@@ -15,6 +15,11 @@ ROLE_PATTERNS: dict[str, tuple[str, ...]] = {
         r"\bdeep learning\b", r"\bapplied ai\b", r"\bllm engineer\b",
         r"\brag engineer\b", r"\bretrieval engineer\b",
         r"\bresearch (?:engineer|scientist)\b",
+        r"\b(?:software|platform|systems?|applied|product)?\s*"
+        r"(?:engineer|developer|scientist)\b.*\b"
+        r"(?:ai|genai|generative ai|llm|rag|agentic)\b",
+        r"\b(?:ai|genai|generative ai|llm|rag|agentic)\b.*\b"
+        r"(?:engineer|developer|scientist)\b",
     ),
     "Computer Vision": (
         r"\bcomputer vision\b", r"\bvision engineer\b",
