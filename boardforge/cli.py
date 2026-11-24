@@ -12,6 +12,7 @@ from boardforge.benchmark import run_benchmark
 from boardforge.comparison import comparison_markdown, run_comparison, run_embedding_comparison
 from boardforge.preference_eval import run_preference_eval
 from boardforge.resume_eval import run_resume_eval
+from boardforge.real_eval import build_corpus_snapshot
 from boardforge.semantic import EmbeddingClient, warm_job_embeddings
 from boardforge.workers import sync_due_sources
 from boardforge.discovery.har import discover_from_har
@@ -98,6 +99,15 @@ def main() -> None:
     p_sync_sources.add_argument("--limit", type=int, default=25)
     p_sync_sources.add_argument("--concurrency", type=int, default=4)
 
+    p_snapshot = sub.add_parser("snapshot-eval-corpus")
+    p_snapshot.add_argument("--country", default="India")
+    p_snapshot.add_argument("--out", default="results/real-corpus.json")
+    p_snapshot.add_argument(
+        "--include-test",
+        action="store_true",
+        help="Include source_kind=test rows. Excluded by default.",
+    )
+
     args = parser.parse_args()
 
     if args.cmd == "benchmark":
@@ -171,6 +181,24 @@ def main() -> None:
             limit=args.limit, concurrency=args.concurrency,
         ))
         _print_json(out)
+        return
+
+    if args.cmd == "snapshot-eval-corpus":
+        store = create_store()
+        payload = build_corpus_snapshot(
+            store.active_jobs(),
+            country=args.country,
+            include_test=args.include_test,
+        )
+        output_path = Path(args.out)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        _print_json({
+            "output": str(output_path),
+            "country": payload["country"],
+            "jobs": len(payload["jobs"]),
+            "excluded_test_jobs": payload["excluded_test_jobs"],
+        })
         return
 
     store = create_store()
