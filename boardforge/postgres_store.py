@@ -14,6 +14,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from boardforge.matching import job_text
+from boardforge.semantic import POSTGRES_EMBEDDING_DIMENSIONS
 from boardforge.models import CandidateProfile, FeedbackRequest, Job, Preferences, SyncSummary
 
 
@@ -241,6 +242,11 @@ class PostgresStore:
         embedding_model: str = "",
     ) -> list[Job]:
         limit = max(1, min(limit, 2000))
+        if query_vector is not None and len(query_vector) != POSTGRES_EMBEDDING_DIMENSIONS:
+            raise ValueError(
+                f"PostgreSQL vector index expects {POSTGRES_EMBEDDING_DIMENSIONS} dimensions; "
+                f"got {len(query_vector)}"
+            )
         normalized = " ".join(query.split())
         with self.connect() as connection:
             if not normalized and query_vector is None:
@@ -297,6 +303,11 @@ class PostgresStore:
         return row["vector"].to_list() if row else None
 
     def save_embedding(self, stable_id: str, model: str, content_hash: str, vector: list[float]) -> None:
+        if len(vector) != POSTGRES_EMBEDDING_DIMENSIONS:
+            raise ValueError(
+                f"PostgreSQL vector index expects {POSTGRES_EMBEDDING_DIMENSIONS} dimensions; "
+                f"got {len(vector)}"
+            )
         with self.connect() as connection:
             connection.execute(
                 """INSERT INTO job_embeddings(stable_id,model,content_hash,vector,updated_at)
