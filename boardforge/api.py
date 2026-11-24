@@ -7,6 +7,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, HttpUrl
 
 from boardforge.agent import JobAgent
+from boardforge.discovery import discover_and_sync
 from boardforge.models import FeedbackRequest, PreferenceUpdate, SearchRequest
 from boardforge.resume import extract_candidate_profile, extract_resume_text
 from boardforge.store import Store
@@ -68,9 +69,15 @@ async def upload_resume(
     if not profile.skills and not profile.role_signals and not profile.education:
         raise HTTPException(status_code=400, detail="could not extract a useful profile from this resume")
     store.save_candidate_profile(profile_id, profile)
-    recommendations = await core_agent.recommend_jobs(profile_id, 20)
+    discovery = await discover_and_sync(
+        store,
+        profile,
+        store.load_preferences(profile_id),
+    )
+    recommendations = await core_agent.recommend_jobs(profile_id, 15)
     return {
         "profile": profile.model_dump(),
+        "discovery": discovery.as_dict(),
         **recommendations.data,
     }
 
@@ -82,9 +89,24 @@ def candidate_profile(profile_id: str):
 
 
 @app.get("/recommendations/{profile_id}")
-async def recommendations(profile_id: str, top_k: int = 20):
+async def recommendations(profile_id: str, top_k: int = 15):
     result = await core_agent.recommend_jobs(profile_id, max(1, min(top_k, 50)))
     return result.data
+
+
+@app.post("/discover/{profile_id}")
+async def discover(profile_id: str, req: SearchRequest):
+    profile = store.load_candidate_profile(profile_id)
+    if profile is None:
+        raise HTTPException(status_code=400, detail="upload a resume before online discovery")
+    report = await discover_and_sync(
+        store,
+        profile,
+        store.load_preferences(profile_id),
+        query=req.query,
+    )
+    result = await core_agent.search_jobs(profile_id, req.query, req.top_k)
+    return {"discovery": report.as_dict(), **result.data}
 
 
 @app.post("/preferences")
