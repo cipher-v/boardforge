@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from boardforge.models import FeedbackRequest, Job, Preferences, SyncSummary
+from boardforge.models import CandidateProfile, FeedbackRequest, Job, Preferences, SyncSummary
 
 
 SCHEMA = """
@@ -68,6 +68,12 @@ CREATE TABLE IF NOT EXISTS job_embeddings (
 CREATE TABLE IF NOT EXISTS profiles (
   profile_id TEXT PRIMARY KEY,
   preferences TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS candidate_profiles (
+  profile_id TEXT PRIMARY KEY,
+  profile TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
 
@@ -303,6 +309,22 @@ class Store:
                 "SELECT preferences FROM profiles WHERE profile_id=?", (profile_id,)
             ).fetchone()
         return Preferences.model_validate_json(row["preferences"]) if row else Preferences()
+
+    def save_candidate_profile(self, profile_id: str, profile: CandidateProfile) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """INSERT INTO candidate_profiles(profile_id,profile,updated_at) VALUES(?,?,?)
+                   ON CONFLICT(profile_id) DO UPDATE SET profile=excluded.profile,
+                   updated_at=excluded.updated_at""",
+                (profile_id, profile.model_dump_json(), _utcnow()),
+            )
+
+    def load_candidate_profile(self, profile_id: str) -> CandidateProfile | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT profile FROM candidate_profiles WHERE profile_id=?", (profile_id,)
+            ).fetchone()
+        return CandidateProfile.model_validate_json(row["profile"]) if row else None
 
     def record_feedback(self, request: FeedbackRequest) -> None:
         with self.connect() as connection:
