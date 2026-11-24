@@ -21,3 +21,8 @@ testpaths = ["tests"]
 
 [tool.setuptools.package-data]
 boardforge = ["data/*.json", "static/*.html"]
+
+
+[tool.setuptools.packages.find]
+include = ["boardforge*"]
+exclude = ["tests*", "evals*", "results*"]
