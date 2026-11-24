@@ -81,6 +81,11 @@ def main() -> None:
     p_embed_index = sub.add_parser("embed-index")
     p_embed_index.add_argument("--batch-size", type=int, default=64)
     p_embed_index.add_argument("--max-jobs", type=int, default=10000)
+    p_embed_index.add_argument(
+        "--allow-sqlite",
+        action="store_true",
+        help="Allow embedding backfill against the SQLite fallback store.",
+    )
 
     p_sync_sources = sub.add_parser("sync-sources")
     p_sync_sources.add_argument("--interval-seconds", type=int, default=3600)
@@ -138,10 +143,17 @@ def main() -> None:
         return
 
     if args.cmd == "embed-index":
+        store = create_store()
+        if type(store).__name__ == "Store" and not args.allow_sqlite:
+            raise RuntimeError(
+                "embed-index refuses the SQLite fallback by default. "
+                "Set DATABASE_URL for PostgreSQL, or pass --allow-sqlite intentionally."
+            )
         out = asyncio.run(warm_job_embeddings(
-            create_store(), EmbeddingClient(),
+            store, EmbeddingClient(),
             batch_size=args.batch_size, max_jobs=args.max_jobs,
         ))
+        out["store"] = type(store).__name__
         _print_json(out)
         return
 
