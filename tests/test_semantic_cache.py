@@ -125,4 +125,36 @@ def test_semantic_only_match_is_not_marked_recommended(tmp_path: Path):
     by_id = {match.job.external_id: match for match in matches}
     assert by_id["backend"].status == "recommended"
     assert by_id["sales"].status == "needs_verification"
-    assert "semantic-only relevance; no lexical or role evidence" in by_id["sales"].risks
+    assert "semantic-only relevance; no concrete query or role evidence" in by_id["sales"].risks
+
+
+
+def test_generic_country_overlap_does_not_create_confident_relevance():
+    client = FakeEmbeddings()
+    jobs = [
+        Job(
+            source_kind="benchmark",
+            source_key="cache",
+            external_id="irrelevant",
+            title="Sales Executive",
+            company="Demo",
+            country="India",
+            description="Enterprise account management in India",
+        ),
+    ]
+
+    matches = asyncio.run(hybrid_rank_jobs(
+        jobs,
+        Preferences(countries=["India"]),
+        query="machine learning engineer India",
+        top_k=10,
+        rejected_ids=set(),
+        client=client,
+        store=None,
+    ))
+
+    assert matches[0].status == "needs_verification"
+    assert (
+        "semantic-only relevance; no concrete query or role evidence"
+        in matches[0].risks
+    )
