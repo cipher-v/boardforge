@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, HttpUrl
 
 from boardforge.agent import JobAgent
@@ -22,6 +25,14 @@ tool_agent = ToolCallingAgent(core_agent)
 
 class SyncRequest(BaseModel):
     url: HttpUrl
+
+
+_UI_PATH = Path(__file__).resolve().parent / "static" / "index.html"
+
+
+@app.get("/", include_in_schema=False)
+def ui():
+    return FileResponse(_UI_PATH)
 
 
 @app.get("/health")
