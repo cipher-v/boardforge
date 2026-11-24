@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
@@ -49,14 +50,29 @@ def ui():
 
 @app.get("/health")
 def health():
-    return {"status":"ok","version":"0.6.0","deployment_mode":"local-demo"}
+    return {
+        "status": "ok",
+        "version": "0.6.0",
+        "deployment_mode": "cloud-run" if os.getenv("K_SERVICE") else "local-demo",
+    }
 
 
 @app.get("/ready")
 def ready():
     if not store.ping():
         raise HTTPException(status_code=503, detail="database unavailable")
-    return {"status": "ready", "store": type(store).__name__}
+    embeddings = core_agent.embeddings
+    embedding_state = {
+        "enabled": embeddings.enabled,
+        "model": embeddings.model if embeddings.enabled else None,
+    }
+    if embeddings.enabled:
+        embedding_state.update(store.embedding_status(embeddings.model))
+    return {
+        "status": "ready",
+        "store": type(store).__name__,
+        "embeddings": embedding_state,
+    }
 
 
 @app.get("/metrics", include_in_schema=False)

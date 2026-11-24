@@ -4,7 +4,9 @@ import asyncio
 import hashlib
 import math
 import os
+import random
 import re
+import time
 from typing import Protocol
 
 import httpx
@@ -12,6 +14,7 @@ import httpx
 from boardforge.database import StoreProtocol
 from boardforge.matching import job_text, query_text, query_topic_terms, rank_jobs
 from boardforge.models import Job, Match, Preferences
+from boardforge.observability import observe_embedding_request
 
 
 RETRIEVAL_QUERY = "RETRIEVAL_QUERY"
@@ -132,6 +135,9 @@ class VertexGeminiEmbeddingProvider:
         self._concurrency = max(
             1, min(8, int(os.getenv("BOARDFORGE_EMBEDDING_CONCURRENCY", "4")))
         )
+        self._max_retries = max(
+            0, min(5, int(os.getenv("BOARDFORGE_EMBEDDING_MAX_RETRIES", "3")))
+        )
 
     def _ensure_credentials(self):
         if self._credentials is not None:
@@ -176,26 +182,46 @@ class VertexGeminiEmbeddingProvider:
         task_type: str,
         semaphore: asyncio.Semaphore,
     ) -> list[float]:
-        async with semaphore:
-            response = await client.post(
-                self.endpoint,
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "instances": [
-                        {
-                            "content": text,
-                            "task_type": task_type,
-                        }
-                    ],
-                    "parameters": {
-                        "autoTruncate": True,
-                        "outputDimensionality": self.dimensions,
-                    },
-                },
-            )
+        payload = {
+            "instances": [{"content": text, "task_type": task_type}],
+            "parameters": {
+                "autoTruncate": True,
+                "outputDimensionality": self.dimensions,
+            },
+        }
+        response = None
+        for attempt in range(self._max_retries + 1):
+            started = time.perf_counter()
+            try:
+                async with semaphore:
+                    response = await client.post(
+                        self.endpoint,
+                        headers={
+                            "Authorization": f"Bearer {token}",
+                            "Content-Type": "application/json",
+                        },
+                        json=payload,
+                    )
+            except (httpx.TimeoutException, httpx.TransportError):
+                observe_embedding_request(
+                    "vertex", task_type, "transport_error", time.perf_counter() - started
+                )
+                if attempt >= self._max_retries:
+                    raise
+            else:
+                observe_embedding_request(
+                    "vertex", task_type, str(response.status_code), time.perf_counter() - started
+                )
+                if response.status_code not in {429, 500, 502, 503, 504}:
+                    break
+                if attempt >= self._max_retries:
+                    break
+
+            delay = min(8.0, 0.5 * (2**attempt)) + random.uniform(0.0, 0.25)
+            await asyncio.sleep(delay)
+
+        if response is None:
+            raise RuntimeError("Vertex embedding request failed before receiving a response")
         if response.status_code in {401, 403}:
             raise RuntimeError(
                 f"Vertex embedding authentication/permission failure ({response.status_code})"
@@ -257,6 +283,7 @@ class EmbeddingClient:
     """Feature-gated facade over the configured embedding provider."""
 
     def __init__(self, provider: EmbeddingProvider | None = None):
+        self._provider_injected = provider is not None
         self.provider = provider or create_embedding_provider()
 
     @property
@@ -269,10 +296,13 @@ class EmbeddingClient:
 
     @property
     def enabled(self) -> bool:
-        return (
+        # An explicitly injected provider is already an explicit opt-in. This
+        # keeps tests/evaluations deterministic without weakening the runtime
+        # feature gate used by the default environment-created provider.
+        feature_enabled = self._provider_injected or (
             os.getenv("BOARDFORGE_ENABLE_EMBEDDINGS", "0") == "1"
-            and self.provider.enabled
         )
+        return feature_enabled and self.provider.enabled
 
     async def embed(
         self,
@@ -407,14 +437,16 @@ async def retrieve_and_rank_jobs(
     retrieval_query = semantic_query_text(prefs, query)
     query_vector: list[float] | None = None
     semantic_retrieval = False
+    embedding_error: str | None = None
     if client.enabled and retrieval_query:
         try:
             query_vector = (
                 await client.embed([retrieval_query], task_type=RETRIEVAL_QUERY)
             )[0]
             semantic_retrieval = True
-        except Exception:
+        except Exception as exc:
             query_vector = None
+            embedding_error = f"{type(exc).__name__}: {exc}"
 
     jobs = store.candidate_jobs(
         retrieval_query,
@@ -439,6 +471,7 @@ async def retrieve_and_rank_jobs(
         "candidate_limit": candidate_limit,
         "semantic_retrieval": semantic_retrieval,
         "embedding_model": client.model if client.enabled else None,
+        "embedding_error": embedding_error,
         "hard_filters_pushed_down": isinstance(prefs, Preferences) and bool(
             prefs.countries
             or prefs.locations

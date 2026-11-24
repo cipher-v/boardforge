@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from boardforge.matching import job_text
 from boardforge.models import CandidateProfile, FeedbackRequest, Job, Preferences, SyncSummary
 
 
@@ -332,8 +333,23 @@ class Store:
         limit: int = 100,
         countries: list[str] | None = None,
     ) -> list[Job]:
-        del model
-        jobs = self.active_jobs()
+        with self.connect() as connection:
+            rows = connection.execute(
+                """SELECT j.payload,j.first_seen,j.last_seen,e.content_hash AS embedded_hash
+                   FROM jobs j LEFT JOIN job_embeddings e
+                     ON e.stable_id=j.stable_id AND e.model=?
+                   WHERE j.status='active' ORDER BY j.last_seen DESC""",
+                (model,),
+            ).fetchall()
+        jobs: list[Job] = []
+        for row in rows:
+            job = Job.model_validate_json(row["payload"]).model_copy(update={
+                "first_seen_at": datetime.fromisoformat(row["first_seen"]),
+                "last_seen_at": datetime.fromisoformat(row["last_seen"]),
+            })
+            digest = hashlib.sha256(job_text(job)[:6000].encode("utf-8")).hexdigest()
+            if row["embedded_hash"] != digest:
+                jobs.append(job)
         if countries:
             allowed = {country.casefold() for country in countries}
             jobs = [job for job in jobs if job.country.casefold() in allowed]
@@ -382,6 +398,31 @@ class Store:
                      updated_at=excluded.updated_at""",
                 (stable_id, model, content_hash, json.dumps(vector), _utcnow()),
             )
+
+    def embedding_status(self, model: str) -> dict:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """SELECT j.payload,e.content_hash AS embedded_hash
+                   FROM jobs j LEFT JOIN job_embeddings e
+                     ON e.stable_id=j.stable_id AND e.model=?
+                   WHERE j.status='active'""",
+                (model,),
+            ).fetchall()
+        total = len(rows)
+        embedded = sum(
+            row["embedded_hash"]
+            == hashlib.sha256(
+                job_text(Job.model_validate_json(row["payload"]))[:6000].encode("utf-8")
+            ).hexdigest()
+            for row in rows
+        )
+        return {
+            "model": model,
+            "active_jobs": total,
+            "embedded_jobs": embedded,
+            "backlog": max(0, total - embedded),
+            "coverage": round(embedded / total, 4) if total else 1.0,
+        }
 
     def save_preferences(self, profile_id: str, preferences: Preferences) -> None:
         with self.connect() as connection:

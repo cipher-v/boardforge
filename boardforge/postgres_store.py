@@ -367,27 +367,45 @@ class PostgresStore:
                 ).fetchall()
             else:
                 vector_param = Vector(query_vector)
+                # Generate bounded lexical and vector candidate sets separately.
+                # Keeping the vector CTE ordered directly by distance allows
+                # pgvector's HNSW index to participate; the previous LEFT JOIN
+                # combined-score scan had to score every active job first.
                 sql = (
-                    "SELECT j.payload,j.first_seen,j.last_seen,"
-                    " ts_rank_cd(j.search_vector,websearch_to_tsquery('english',%s)) AS lexical,"
-                    " CASE WHEN e.vector IS NULL THEN 0 ELSE 1-(e.vector <=> %s) END AS semantic"
-                    " FROM jobs j LEFT JOIN job_embeddings e"
-                    " ON e.stable_id=j.stable_id AND e.model=%s"
-                    " WHERE j.status='active'"
+                    "WITH lexical AS ("
+                    " SELECT j.stable_id,"
+                    " ts_rank_cd(j.search_vector,websearch_to_tsquery('english',%s)) AS score"
+                    " FROM jobs j WHERE j.status='active'"
                     + filters
-                    + " ORDER BY (0.65*ts_rank_cd(j.search_vector,websearch_to_tsquery('english',%s))"
-                    " +0.35*CASE WHEN e.vector IS NULL THEN 0 ELSE 1-(e.vector <=> %s) END) DESC,"
+                    + " ORDER BY score DESC,j.last_seen DESC LIMIT %s"
+                    "), semantic AS ("
+                    " SELECT j.stable_id,1-(e.vector <=> %s) AS score"
+                    " FROM job_embeddings e JOIN jobs j ON j.stable_id=e.stable_id"
+                    " WHERE e.model=%s AND j.status='active'"
+                    + filters
+                    + " ORDER BY e.vector <=> %s LIMIT %s"
+                    "), candidates AS ("
+                    " SELECT stable_id FROM lexical UNION SELECT stable_id FROM semantic"
+                    ")"
+                    " SELECT j.payload,j.first_seen,j.last_seen,"
+                    " COALESCE(l.score,0) AS lexical,COALESCE(s.score,0) AS semantic"
+                    " FROM candidates c JOIN jobs j ON j.stable_id=c.stable_id"
+                    " LEFT JOIN lexical l ON l.stable_id=c.stable_id"
+                    " LEFT JOIN semantic s ON s.stable_id=c.stable_id"
+                    " ORDER BY (0.65*COALESCE(l.score,0)+0.35*COALESCE(s.score,0)) DESC,"
                     " j.last_seen DESC LIMIT %s"
                 )
                 rows = connection.execute(
                     sql,
                     (
                         normalized,
+                        *filter_params,
+                        limit,
                         vector_param,
                         embedding_model,
                         *filter_params,
-                        normalized,
                         vector_param,
+                        limit,
                         limit,
                     ),
                 ).fetchall()
@@ -429,6 +447,28 @@ class PostgresStore:
                      updated_at=excluded.updated_at""",
                 (stable_id, model, content_hash, vector, _utcnow()),
             )
+
+    def embedding_status(self, model: str) -> dict:
+        with self.connect() as connection:
+            row = connection.execute(
+                """SELECT COUNT(*) FILTER (WHERE j.status='active') AS active_jobs,
+                          COUNT(*) FILTER (
+                            WHERE j.status='active' AND e.stable_id IS NOT NULL
+                              AND e.content_hash=j.embedding_hash
+                          ) AS embedded_jobs
+                   FROM jobs j LEFT JOIN job_embeddings e
+                     ON e.stable_id=j.stable_id AND e.model=%s""",
+                (model,),
+            ).fetchone()
+        total = row["active_jobs"]
+        embedded = row["embedded_jobs"]
+        return {
+            "model": model,
+            "active_jobs": total,
+            "embedded_jobs": embedded,
+            "backlog": max(0, total - embedded),
+            "coverage": round(embedded / total, 4) if total else 1.0,
+        }
 
     def save_preferences(self, profile_id: str, preferences: Preferences) -> None:
         with self.connect() as connection:

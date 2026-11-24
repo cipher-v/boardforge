@@ -115,6 +115,11 @@ Populate or refresh missing job embeddings with:
 python -m boardforge.cli embed-index --batch-size 64 --max-jobs 10000
 ```
 
+The independent worker also backfills a bounded number of missing/stale
+embeddings after each discovery/source-refresh cycle. Configure the per-cycle
+budget with `BOARDFORGE_EMBEDDING_JOBS_PER_CYCLE`; unchanged jobs are not sent
+to the provider again.
+
 ### Vertex Gemini embeddings
 
 The production semantic-retrieval path can use Vertex AI with an explicit
@@ -135,6 +140,15 @@ and model/provider/dimension are part of the cache key so incompatible embedding
 spaces are not mixed. Local development uses Google Application Default
 Credentials; deployed environments should use their workload/service identity
 rather than committed credential files.
+
+Vertex calls retry bounded `429` and transient `5xx` responses with exponential
+backoff. `/ready` reports the active embedding model, indexed-job coverage and
+backlog; `/metrics` exposes provider request status/latency and backlog metrics.
+
+For a reproducible Cloud Run service + scheduled-job deployment, see
+[`deploy/gcp`](deploy/gcp/README.md). The container reads Cloud Run's injected
+`PORT`; the maintenance image supports `python -m boardforge.worker --once` for
+Cloud Run Jobs.
 
 The included browser UI is intentionally a single-user local demo. It stores the
 extracted profile, preferences and feedback in SQLite, never the raw resume, and

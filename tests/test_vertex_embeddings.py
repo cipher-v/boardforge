@@ -36,6 +36,8 @@ class FakeAsyncClient:
 
     async def post(self, url, **kwargs):
         self.capture.setdefault("requests", []).append((url, kwargs))
+        if isinstance(self.response, list):
+            return self.response.pop(0)
         return self.response
 
 
@@ -118,3 +120,35 @@ def test_vertex_embedding_response_dimension_is_validated(monkeypatch):
         asyncio.run(
             provider.embed(["backend engineer India"], task_type=RETRIEVAL_QUERY)
         )
+
+
+def test_vertex_embedding_retries_rate_limit(monkeypatch):
+    provider = _provider(monkeypatch)
+    provider._max_retries = 1
+    capture = {}
+    responses = [
+        FakeResponse(status_code=429),
+        FakeResponse(payload={
+            "predictions": [{"embeddings": {"values": [0.01] * 768}}]
+        }),
+    ]
+
+    async def fake_token():
+        return "token"
+
+    async def no_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(provider, "_access_token", fake_token)
+    monkeypatch.setattr("boardforge.semantic.asyncio.sleep", no_sleep)
+    monkeypatch.setattr(
+        "boardforge.semantic.httpx.AsyncClient",
+        lambda **kwargs: FakeAsyncClient(capture, responses, **kwargs),
+    )
+
+    vectors = asyncio.run(
+        provider.embed(["backend engineer India"], task_type=RETRIEVAL_QUERY)
+    )
+
+    assert len(capture["requests"]) == 2
+    assert len(vectors[0]) == 768
