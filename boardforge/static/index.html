@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BoardForge</title>
+<style>
+:root{--bg:#0b0d10;--panel:#12161b;--panel2:#181d23;--text:#eef2f6;--muted:#95a1ad;--line:#262d35;--accent:#d6ff54;--danger:#ff6b6b;--ok:#79e2a0}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif}
+.shell{max-width:1180px;margin:auto;padding:34px 24px 70px}.brand{display:flex;justify-content:space-between;align-items:center;margin-bottom:32px}.logo{font-size:24px;font-weight:800;letter-spacing:-.6px}.pill{border:1px solid var(--line);border-radius:999px;padding:7px 11px;color:var(--muted);font-size:12px}
+.hero{display:grid;grid-template-columns:1.3fr .7fr;gap:18px;margin-bottom:18px}.card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:20px}.hero h1{font-size:38px;line-height:1.06;letter-spacing:-1.4px;margin:0 0 10px}.sub{color:var(--muted);max-width:720px}
+label{display:block;color:var(--muted);font-size:12px;margin:15px 0 7px}textarea,input{width:100%;border:1px solid var(--line);background:#0f1317;color:var(--text);border-radius:11px;padding:12px 13px;outline:none}textarea{min-height:92px;resize:vertical}textarea:focus,input:focus{border-color:#586471}
+.row{display:flex;gap:9px;align-items:center}.row>*{flex:1}.btn{border:0;border-radius:10px;padding:11px 15px;font-weight:700;cursor:pointer;background:var(--accent);color:#101308}.btn.secondary{background:#20262d;color:var(--text);border:1px solid var(--line)}.btn.danger{background:transparent;color:#ff9a9a;border:1px solid #4e2929}.btn:disabled{opacity:.55;cursor:wait}
+.syncline{display:flex;gap:8px}.syncline input{flex:1}.status{margin-top:10px;color:var(--muted);font-size:12px;min-height:18px}
+.searchbar{display:flex;gap:10px;margin:18px 0}.searchbar input{font-size:16px;padding:14px}.searchbar .btn{flex:0 0 120px}
+.meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.tag{background:#1b2229;border:1px solid var(--line);padding:4px 8px;border-radius:999px;color:#cbd4dc;font-size:12px}
+.results{display:grid;gap:12px}.job{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px}.jobhead{display:flex;justify-content:space-between;gap:20px}.job h3{margin:0;font-size:18px}.company{color:var(--muted);margin-top:2px}.score{font-weight:800;font-variant-numeric:tabular-nums}.score small{display:block;color:var(--muted);font-weight:500;font-size:11px;text-align:right}.cols{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:14px 0}.box{background:#0e1216;border-radius:10px;padding:10px 12px;color:#c6d0d9;font-size:13px}.box strong{color:var(--text);display:block;margin-bottom:5px}.reason:before{content:"✓ ";color:var(--ok)}.risk:before{content:"! ";color:#ffd36b}.actions{display:flex;gap:8px}.actions a{text-decoration:none;text-align:center}.empty{text-align:center;color:var(--muted);padding:55px 20px;border:1px dashed var(--line);border-radius:16px}
+@media(max-width:800px){.hero{grid-template-columns:1fr}.hero h1{font-size:31px}.cols{grid-template-columns:1fr}.jobhead{flex-direction:column}.score small{text-align:left}.searchbar{flex-direction:column}.searchbar .btn{flex:auto}}
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="brand"><div class="logo">BoardForge</div><div class="pill" id="health">checking backend…</div></div>
+  <section class="hero">
+    <div class="card">
+      <h1>Job search that remembers what actually matters.</h1>
+      <div class="sub">Set durable preferences once, search with one-off intent, and get evidence-backed matches with explicit risks.</div>
+      <label>Your preferences</label>
+      <textarea id="prefs">I want AI/ML, computer vision or backend roles in India. Avoid unpaid and hardware-heavy roles.</textarea>
+      <div class="row"><button class="btn" id="savePrefs">Save preferences</button><button class="btn secondary" id="agentBtn">Run as agent</button></div>
+      <div class="status" id="prefStatus"></div>
+    </div>
+    <div class="card">
+      <strong>Sync a public career board</strong>
+      <div class="sub" style="margin-top:6px">Greenhouse, Lever, Ashby or supported public career pages.</div>
+      <label>Career URL</label>
+      <div class="syncline"><input id="syncUrl" placeholder="https://job-boards.greenhouse.io/…"><button class="btn secondary" id="syncBtn">Sync</button></div>
+      <div class="status" id="syncStatus"></div>
+      <div class="meta"><span class="tag">temporal tracking</span><span class="tag">hard constraints</span><span class="tag">feedback memory</span></div>
+    </div>
+  </section>
+
+  <div class="searchbar">
+    <input id="query" placeholder="Find Python LLM or backend roles in Bengaluru…">
+    <button class="btn" id="searchBtn">Search</button>
+  </div>
+  <div class="status" id="searchStatus"></div>
+  <main class="results" id="results"><div class="empty">Sync a board, save preferences, then search.</div></main>
+</div>
+<script>
+const profileId = 'local-demo';
+const $ = id => document.getElementById(id);
+async function api(path, body){
+  const r = await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const data = await r.json();
+  if(!r.ok) throw new Error(data.detail || 'Request failed');
+  return data;
+}
+function esc(v=''){return String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function stableId(j){return [j.source_kind,j.source_key,j.external_id].join(':')}
+function render(matches){
+  if(!matches?.length){$('results').innerHTML='<div class="empty">No eligible matches found.</div>';return}
+  $('results').innerHTML=matches.map(m=>{
+    const j=m.job, score=Math.max(0,Math.min(100,Math.round((m.score||0)*100)));
+    const reasons=(m.reasons||[]).map(x=>'<div class="reason">'+esc(x)+'</div>').join('') || '<div>No positive evidence recorded.</div>';
+    const risks=(m.risks||[]).map(x=>'<div class="risk">'+esc(x)+'</div>').join('') || '<div>No flagged risks.</div>';
+    return `<article class="job" data-id="${esc(stableId(j))}">
+      <div class="jobhead"><div><h3>${esc(j.title)}</h3><div class="company">${esc(j.company)} · ${esc(j.location||j.country||'Location unverified')}</div></div>
+      <div class="score">${score}%<small>${esc(m.status||'recommended')}</small></div></div>
+      <div class="meta">${j.remote_policy?'<span class="tag">'+esc(j.remote_policy)+'</span>':''}${j.salary_text?'<span class="tag">'+esc(j.salary_text)+'</span>':''}${j.min_experience_years!=null?'<span class="tag">'+esc(j.min_experience_years)+'+ yrs</span>':''}</div>
+      <div class="cols"><div class="box"><strong>Why it matches</strong>${reasons}</div><div class="box"><strong>Risks / unknowns</strong>${risks}</div></div>
+      <div class="actions">
+        ${j.apply_url?'<a class="btn secondary" target="_blank" rel="noopener" href="'+esc(j.apply_url)+'">Open role</a>':''}
+        <button class="btn secondary feedback" data-v="save">Save</button>
+        <button class="btn danger feedback" data-v="reject">Reject</button>
+      </div></article>`
+  }).join('');
+  document.querySelectorAll('.feedback').forEach(b=>b.onclick=()=>sendFeedback(b));
+}
+async function sendFeedback(btn){
+  const card=btn.closest('.job'), verdict=btn.dataset.v;
+  btn.disabled=true;
+  try{await api('/feedback',{profile_id:profileId,job_id:card.dataset.id,verdict,note:''});card.style.opacity=verdict==='reject'?'.35':'1';btn.textContent=verdict==='reject'?'Rejected':'Saved';}
+  catch(e){alert(e.message);btn.disabled=false}
+}
+$('savePrefs').onclick=async()=>{
+  const b=$('savePrefs');b.disabled=true;$('prefStatus').textContent='Saving…';
+  try{const d=await api('/preferences',{profile_id:profileId,text:$('prefs').value});$('prefStatus').textContent='Saved: '+JSON.stringify(d.preferences.roles||[])}
+  catch(e){$('prefStatus').textContent=e.message}finally{b.disabled=false}
+};
+$('syncBtn').onclick=async()=>{
+  const b=$('syncBtn');b.disabled=true;$('syncStatus').textContent='Syncing…';
+  try{const d=await api('/sync',{url:$('syncUrl').value});$('syncStatus').textContent=`Fetched ${d.fetched}; +${d.inserted} new, ${d.updated} updated, ${d.closed} closed.`}
+  catch(e){$('syncStatus').textContent=e.message}finally{b.disabled=false}
+};
+async function doSearch(){
+  const b=$('searchBtn');b.disabled=true;$('searchStatus').textContent='Ranking jobs…';
+  try{const d=await api('/search',{profile_id:profileId,query:$('query').value,top_k:10});render(d.matches);$('searchStatus').textContent=`${d.matches.length} matches`;}
+  catch(e){$('searchStatus').textContent=e.message}finally{b.disabled=false}
+}
+$('searchBtn').onclick=doSearch;$('query').addEventListener('keydown',e=>{if(e.key==='Enter')doSearch()});
+$('agentBtn').onclick=async()=>{
+  const b=$('agentBtn');b.disabled=true;$('prefStatus').textContent='Agent running…';
+  try{const d=await api('/agent',{profile_id:profileId,query:$('prefs').value,top_k:10});const payload=d.data||d;render(payload.matches||[]);$('prefStatus').textContent=d.message||'Agent completed';}
+  catch(e){$('prefStatus').textContent=e.message}finally{b.disabled=false}
+};
+fetch('/health').then(r=>r.json()).then(d=>$('health').textContent='v'+d.version+' · local').catch(()=>$('health').textContent='backend offline');
+</script>
+</body>
+</html>
