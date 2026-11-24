@@ -9,6 +9,99 @@ explanation of why each change was made. It is not a changelog: routine file
 lists belong in Git history; this document records engineering evidence and
 trade-offs.
 
+## 2026-11-24 — Independent holdout and production-retrieval evaluation
+
+### Requested outcome
+
+Create an independent real-job holdout, provisional evidence-backed labels, and
+an evaluation path through the production PostgreSQL retrieval code. Stop
+before the paid Vertex run, preserve India v1.1 unchanged, and keep all work
+uncommitted for review.
+
+### Dataset decisions
+
+- The source manifest contains ten targeted official ATS boards: Anthropic,
+  Cloudflare, Datadog, Figma, Roblox, Palantir, Notion, Linear, Ramp, and
+  Perplexity. It uses only existing Greenhouse, Lever, and Ashby connectors and
+  excludes the development companies Coinbase, Jumio, and Twilio.
+- Collection is deterministic: each company receives an equal quota and jobs
+  are selected by a category round-robin with stable title/location/ID ordering.
+  Collection refuses to overwrite an existing snapshot unless `--force` is
+  explicit.
+- The frozen corpus contains 100 jobs from ten companies. It stores full job
+  descriptions, official application and board URLs, stable IDs, collection
+  timestamps, category/seniority metadata, and a canonical SHA-256 checksum.
+- The 36 intents cover broad and specialized roles, task paraphrases, changing
+  preferences, manager-versus-IC intent, hard geography/work-policy/experience
+  constraints, ambiguous requests, nontechnical distractors, and two intended
+  no-suitable-job cases.
+- Labels are generated from explicit per-intent description/title criteria and
+  explicitly declared structured hard constraints. They were generated before
+  any ranking evaluation and import neither production query parsing nor the
+  confidence policy. Each of the 3,600 decisions is one of
+  direct, adjacent, irrelevant, or forbidden.
+- Labels are deliberately marked `automated_provisional_not_human_verified`.
+  The Markdown review export includes intent notes and evidence snippets for
+  every non-irrelevant decision. Human corrections must create a new version;
+  they must not mutate the frozen provisional file.
+
+### Evaluation infrastructure
+
+- Added a guarded evaluation runner for lexical-only production retrieval,
+  hybrid PostgreSQL retrieval, and exhaustive corpus reranking.
+- The runner refuses database names that do not contain `holdout`, `eval`, or
+  `test`, and refuses an evaluation database containing unrelated active jobs.
+- Document and query embeddings share a persistent, task-aware cache keyed by
+  model, task type, and text hash. Provider batch calls, provider prediction
+  requests, and cache hits are recorded.
+- Metrics include candidate recall, final precision/recall/NDCG,
+  recommendation precision/recall/coverage, abstention, forbidden-result rate,
+  hard-constraint violations, p50/p95 latency, and embedding usage.
+- `PostgresStore.explain_candidate_jobs` executes the exact candidate SQL under
+  `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` and reports only indexes named by
+  executed plan nodes. It does not infer usage from index existence.
+
+### Issues encountered and resolution
+
+- The environment supplied `E:\mnt\data\matcheval`, but that path did not exist;
+  the live repository was `E:\boardforge`. Work continued on the verified
+  `feat/boardforge-v2` checkout.
+- System Python lacked project dependencies. All generation and tests were
+  rerun with the repository `.venv`.
+- The first category classifier searched entire descriptions, so corporate
+  boilerplate made sales roles look like AI jobs. The classifier was corrected
+  to prioritize role-bearing title evidence and use a restricted technical-only
+  description fallback. The corpus was recollected once before labels were
+  created or evaluation was run.
+- Managed filesystem permissions initially blocked generated labels and the
+  test SQLite database. The same commands succeeded with scoped repository
+  write permission; application code was not changed to work around the
+  environment.
+- A real local `boardforge_holdout_eval` database was created separately from
+  the application database. With the 100 frozen rows and synthetic (non-paid)
+  vectors, PostgreSQL used `idx_jobs_status` and `job_embeddings_pkey`; it did
+  **not** choose the GIN or HNSW indexes. This is the honest result for this
+  small corpus/current query shape, not an index-usage claim. The full runner
+  preserves the raw plans so the paid evaluation can recheck the actual plans.
+
+### Verification and stop condition
+
+- Frozen corpus checksum:
+  `d1f7a5bdbf65dceea31b6c5f67143a4c633c20fdaff88b5748b4837524e139e3`.
+- Provisional-label checksum:
+  `95166916abf9fcc1d221df3f94e06bde8c4a65dd952b98872305b4d1e31bb020`.
+- Final full suite with a dedicated `boardforge_test` pgvector database: 130
+  passed with one existing Starlette deprecation warning. The production
+  EXPLAIN path was additionally exercised manually against the isolated local
+  holdout database.
+- Planned paid usage with an empty cache: 100 document + 36 query = **136
+  Vertex prediction requests**. No Vertex evaluation was executed, in
+  accordance with the requested stop point.
+- Remaining human action: review `docs/holdout-v1-label-review.md`, record
+  corrections in a new human-verified label version, approve the 136-request
+  Vertex run, and then interpret retrieval/ranking metrics without tuning
+  `confidence.py` against this holdout.
+
 ## 2026-11-24 — Deterministic ranking reliability milestone
 
 ### Requested outcome

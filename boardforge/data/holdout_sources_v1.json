@@ -1,0 +1,16 @@
+{
+  "version": "1.0",
+  "kind": "targeted_official_ats_sources",
+  "sources": [
+    {"company": "Anthropic", "kind": "greenhouse", "key": "anthropic", "board_url": "https://job-boards.greenhouse.io/anthropic"},
+    {"company": "Cloudflare", "kind": "greenhouse", "key": "cloudflare", "board_url": "https://job-boards.greenhouse.io/cloudflare"},
+    {"company": "Datadog", "kind": "greenhouse", "key": "datadog", "board_url": "https://job-boards.greenhouse.io/datadog"},
+    {"company": "Figma", "kind": "greenhouse", "key": "figma", "board_url": "https://job-boards.greenhouse.io/figma"},
+    {"company": "Roblox", "kind": "greenhouse", "key": "roblox", "board_url": "https://job-boards.greenhouse.io/roblox"},
+    {"company": "Palantir", "kind": "lever", "key": "palantir", "board_url": "https://jobs.lever.co/palantir"},
+    {"company": "Notion", "kind": "ashby", "key": "notion", "board_url": "https://jobs.ashbyhq.com/notion"},
+    {"company": "Linear", "kind": "ashby", "key": "linear", "board_url": "https://jobs.ashbyhq.com/linear"},
+    {"company": "Ramp", "kind": "ashby", "key": "ramp", "board_url": "https://jobs.ashbyhq.com/ramp"},
+    {"company": "Perplexity", "kind": "ashby", "key": "perplexity", "board_url": "https://jobs.ashbyhq.com/perplexity"}
+  ]
+}

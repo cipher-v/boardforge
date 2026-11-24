@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 from pathlib import Path
 
 from boardforge.agent import JobAgent
@@ -21,6 +22,9 @@ from boardforge.discovery.manifest import ConnectorManifest
 from boardforge.connectors.manifest import fetch_manifest
 from boardforge.store import Store
 from boardforge.sync import sync_url
+from boardforge.holdout import collect_holdout
+from boardforge.holdout_labels import label_holdout
+from boardforge.holdout_eval import plan_vertex_usage, run_production_holdout_eval
 
 
 def _print_json(value) -> None:
@@ -122,7 +126,65 @@ def main() -> None:
         help="Print all per-query rows instead of a compact summary.",
     )
 
+    p_holdout_collect = sub.add_parser("collect-holdout")
+    p_holdout_collect.add_argument("--sources", default="boardforge/data/holdout_sources_v1.json")
+    p_holdout_collect.add_argument("--out", default="boardforge/data/holdout_corpus_v1.json")
+    p_holdout_collect.add_argument("--target", type=int, default=100)
+    p_holdout_collect.add_argument("--force", action="store_true")
+
+    p_holdout_label = sub.add_parser("label-holdout")
+    p_holdout_label.add_argument("--corpus", default="boardforge/data/holdout_corpus_v1.json")
+    p_holdout_label.add_argument("--intents", default="boardforge/data/holdout_intents_v1.json")
+    p_holdout_label.add_argument("--out", default="boardforge/data/holdout_labels_v1_provisional.json")
+    p_holdout_label.add_argument("--review", default="docs/holdout-v1-label-review.md")
+    p_holdout_label.add_argument("--force", action="store_true")
+
+    p_holdout_eval = sub.add_parser("holdout-eval")
+    p_holdout_eval.add_argument("--corpus", default="boardforge/data/holdout_corpus_v1.json")
+    p_holdout_eval.add_argument("--labels", default="boardforge/data/holdout_labels_v1_provisional.json")
+    p_holdout_eval.add_argument("--cache", default="results/holdout-embedding-cache.json")
+    p_holdout_eval.add_argument("--out", default="results/holdout-eval.json")
+    p_holdout_eval.add_argument("--database-url", default=None)
+    p_holdout_eval.add_argument("--top-k", type=int, default=10)
+    p_holdout_eval.add_argument("--candidate-limit", type=int, default=50)
+    p_holdout_eval.add_argument(
+        "--execute-vertex", action="store_true",
+        help="Execute the paid Vertex/PostgreSQL evaluation; without this flag only usage is planned.",
+    )
+
     args = parser.parse_args()
+
+    if args.cmd == "collect-holdout":
+        _print_json(asyncio.run(collect_holdout(
+            args.sources, args.out, target_count=args.target, force=args.force
+        )))
+        return
+
+    if args.cmd == "label-holdout":
+        _print_json(label_holdout(
+            args.corpus, args.intents, args.out, args.review, force=args.force
+        ))
+        return
+
+    if args.cmd == "holdout-eval":
+        plan = plan_vertex_usage(args.corpus, args.labels, args.cache)
+        if not args.execute_vertex:
+            _print_json(plan)
+            return
+        database_url = args.database_url or os.getenv("BOARDFORGE_HOLDOUT_DATABASE_URL", "")
+        if not database_url:
+            raise RuntimeError(
+                "--execute-vertex requires --database-url or BOARDFORGE_HOLDOUT_DATABASE_URL"
+            )
+        report = asyncio.run(run_production_holdout_eval(
+            database_url, args.corpus, args.labels, args.cache,
+            top_k=args.top_k, candidate_limit=args.candidate_limit,
+        ))
+        output_path = Path(args.out)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
+        _print_json({**plan, "execution": report, "output": str(output_path)})
+        return
 
     if args.cmd == "benchmark":
         out = run_benchmark(args.dataset, args.top_k) if args.dataset else run_benchmark(top_k=args.top_k)

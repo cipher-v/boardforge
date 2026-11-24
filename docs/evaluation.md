@@ -151,3 +151,36 @@ High synthetic benchmark scores are useful only when paired with:
 - later validation on real user feedback
 
 The next evaluation milestone is a real-user labeled set collected from deployed BoardForge sessions.
+
+## Independent production-retrieval holdout
+
+The v1 holdout is separate from the 29-job India development benchmark:
+
+- `boardforge/data/holdout_corpus_v1.json`: 100 frozen jobs from ten official
+  Greenhouse, Lever, and Ashby boards.
+- `boardforge/data/holdout_labels_v1_provisional.json`: 36 intents and complete
+  four-way labels. These are automated provisional labels, not human truth.
+- `docs/holdout-v1-label-review.md`: evidence export for human review.
+
+Plan paid usage without contacting Vertex or PostgreSQL:
+
+```bash
+python -m boardforge.cli holdout-eval
+```
+
+The current empty-cache plan is 100 document plus 36 query embeddings (136
+Vertex prediction requests). Lexical, hybrid, and exhaustive variants reuse the
+same persistent cache.
+
+After human label review, create a separate PostgreSQL database (for example
+`boardforge_holdout_eval`) and explicitly execute:
+
+```bash
+python -m boardforge.cli holdout-eval \
+  --execute-vertex \
+  --database-url postgresql://boardforge:boardforge@localhost:5432/boardforge_holdout_eval
+```
+
+The database-name guard refuses the normal application database. The report
+contains actual `EXPLAIN ANALYZE` plans and names GIN/HNSW only if PostgreSQL
+used those indexes in the executed plan.

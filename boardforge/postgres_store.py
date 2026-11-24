@@ -411,6 +411,93 @@ class PostgresStore:
                 ).fetchall()
         return self._jobs(rows)
 
+    def explain_candidate_jobs(
+        self,
+        query: str,
+        *,
+        limit: int = 250,
+        query_vector: list[float] | None = None,
+        embedding_model: str = "",
+        preferences: Preferences | None = None,
+    ) -> dict:
+        """Run the actual candidate query under EXPLAIN ANALYZE.
+
+        Indexes are reported only when an executed plan node names them. This
+        intentionally does not infer utilization from pg_indexes.
+        """
+        limit = max(1, min(limit, 2000))
+        if query_vector is not None and len(query_vector) != POSTGRES_EMBEDDING_DIMENSIONS:
+            raise ValueError(
+                f"PostgreSQL vector index expects {POSTGRES_EMBEDDING_DIMENSIONS} dimensions; "
+                f"got {len(query_vector)}"
+            )
+        normalized = " ".join(query.split())
+        filters, filter_params = self._candidate_filter_clause(preferences)
+        if not normalized and query_vector is None:
+            sql = (
+                "SELECT j.payload,j.first_seen,j.last_seen FROM jobs j "
+                "WHERE j.status='active'" + filters
+                + " ORDER BY j.last_seen DESC LIMIT %s"
+            )
+            params = (*filter_params, limit)
+        elif query_vector is None:
+            sql = (
+                "SELECT j.payload,j.first_seen,j.last_seen,"
+                " ts_rank_cd(j.search_vector,websearch_to_tsquery('english',%s)) AS lexical"
+                " FROM jobs j WHERE j.status='active'" + filters
+                + " ORDER BY lexical DESC,j.last_seen DESC LIMIT %s"
+            )
+            params = (normalized, *filter_params, limit)
+        else:
+            vector_param = Vector(query_vector)
+            sql = (
+                "WITH lexical AS ("
+                " SELECT j.stable_id,"
+                " ts_rank_cd(j.search_vector,websearch_to_tsquery('english',%s)) AS score"
+                " FROM jobs j WHERE j.status='active'" + filters
+                + " ORDER BY score DESC,j.last_seen DESC LIMIT %s"
+                "), semantic AS ("
+                " SELECT j.stable_id,1-(e.vector <=> %s) AS score"
+                " FROM job_embeddings e JOIN jobs j ON j.stable_id=e.stable_id"
+                " WHERE e.model=%s AND j.status='active'" + filters
+                + " ORDER BY e.vector <=> %s LIMIT %s"
+                "), candidates AS ("
+                " SELECT stable_id FROM lexical UNION SELECT stable_id FROM semantic"
+                ")"
+                " SELECT j.payload,j.first_seen,j.last_seen,"
+                " COALESCE(l.score,0) AS lexical,COALESCE(s.score,0) AS semantic"
+                " FROM candidates c JOIN jobs j ON j.stable_id=c.stable_id"
+                " LEFT JOIN lexical l ON l.stable_id=c.stable_id"
+                " LEFT JOIN semantic s ON s.stable_id=c.stable_id"
+                " ORDER BY (0.65*COALESCE(l.score,0)+0.35*COALESCE(s.score,0)) DESC,"
+                " j.last_seen DESC LIMIT %s"
+            )
+            params = (
+                normalized, *filter_params, limit, vector_param, embedding_model,
+                *filter_params, vector_param, limit, limit,
+            )
+        with self.connect() as connection:
+            raw = connection.execute(
+                "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + sql, params
+            ).fetchone()["QUERY PLAN"]
+        plan = raw[0] if isinstance(raw, list) else raw
+        indexes: list[str] = []
+
+        def visit(node: dict) -> None:
+            if node.get("Index Name"):
+                indexes.append(node["Index Name"])
+            for child in node.get("Plans", []):
+                visit(child)
+
+        visit(plan["Plan"])
+        return {
+            "actual_indexes": sorted(set(indexes)),
+            "gin_used": "idx_jobs_search_vector" in indexes,
+            "hnsw_used": "idx_job_embeddings_hnsw" in indexes,
+            "execution_time_ms": plan.get("Execution Time"),
+            "plan": plan,
+        }
+
     def job_status(self, stable_id: str) -> str | None:
         with self.connect() as connection:
             row = connection.execute("SELECT status FROM jobs WHERE stable_id=%s", (stable_id,)).fetchone()

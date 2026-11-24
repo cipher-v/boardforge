@@ -73,6 +73,13 @@ def test_postgres_store_migrations_fts_vectors_and_state():
         assert store.candidate_jobs(
             "backend", limit=2, query_vector=vector, embedding_model="test-model"
         )[0].external_id == "backend"
+        lexical_plan = store.explain_candidate_jobs("backend", limit=2)
+        hybrid_plan = store.explain_candidate_jobs(
+            "backend", limit=2, query_vector=vector, embedding_model="test-model"
+        )
+        assert isinstance(lexical_plan["actual_indexes"], list)
+        assert isinstance(hybrid_plan["actual_indexes"], list)
+        assert "plan" in lexical_plan and "plan" in hybrid_plan
         india_embedding_candidates = store.embedding_candidates(
             "another-model", limit=10, countries=["India"]
         )
