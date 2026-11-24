@@ -156,7 +156,7 @@ async def run_embedding_comparison(
     if not client.enabled:
         return {
             "status": "skipped",
-            "reason": "Set OPENAI_API_KEY and BOARDFORGE_ENABLE_EMBEDDINGS=1 to run embedding comparison.",
+            "reason": "Configure BOARDFORGE_EMBEDDING_PROVIDER credentials and set BOARDFORGE_ENABLE_EMBEDDINGS=1.",
         }
 
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
