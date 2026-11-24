@@ -57,29 +57,22 @@ class JobAgent:
             },
         )
 
-    async def recommend_jobs(self, profile_id: str, top_k: int = 20) -> AgentResult:
-        """Broader resume-led recommendations; role families are soft signals here."""
+    async def recommend_jobs(self, profile_id: str, top_k: int = 15) -> AgentResult:
+        """Resume-led recommendations that stay within relevant role families."""
         saved = self.store.load_preferences(profile_id)
         candidate_profile = self.store.load_candidate_profile(profile_id)
         if candidate_profile is None:
             return await self.search_jobs(profile_id, "", top_k)
 
         prefs = saved.model_copy(deep=True)
-        saved_roles = list(prefs.roles)
-        prefs.roles = []
+        if not prefs.roles:
+            prefs.roles = candidate_profile.role_signals[:4]
         prefs = apply_candidate_context(prefs, candidate_profile)
-
-        resume_query = " ".join(
-            saved_roles
-            + candidate_profile.role_signals
-            + candidate_profile.skills[:12]
-            + candidate_profile.domains[:4]
-        ).strip()
 
         matches = await hybrid_rank_jobs(
             self.store.active_jobs(),
             prefs,
-            query=resume_query,
+            query="",
             top_k=top_k,
             rejected_ids=self.store.rejected_job_ids(profile_id),
             client=self.embeddings,
