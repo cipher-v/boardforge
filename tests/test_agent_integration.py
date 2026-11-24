@@ -129,7 +129,7 @@ def test_explicit_manual_role_search_overrides_resume_role_signal(tmp_path: Path
     assert [m["job"]["external_id"] for m in result.data["matches"]] == ["ai"]
 
 
-def test_resume_recommendations_broaden_saved_role_filter(tmp_path: Path):
+def test_resume_recommendations_respect_explicit_saved_role(tmp_path: Path):
     agent, store = make_agent(tmp_path)
     store.save_preferences("u", Preferences(roles=["AI/ML"]))
     store.save_candidate_profile(
@@ -140,20 +140,18 @@ def test_resume_recommendations_broaden_saved_role_filter(tmp_path: Path):
             domains=["Backend / APIs"],
         ),
     )
-    store.upsert_source_jobs("benchmark", "resume-broad", [
+    store.upsert_source_jobs("benchmark", "resume-strict", [
         Job(
-            source_kind="benchmark", source_key="resume-broad", external_id="ai",
+            source_kind="benchmark", source_key="resume-strict", external_id="ai",
             title="AI Engineer", company="Demo",
             description="Python PyTorch machine learning",
         ),
         Job(
-            source_kind="benchmark", source_key="resume-broad", external_id="backend",
+            source_kind="benchmark", source_key="resume-strict", external_id="backend",
             title="Backend Engineer", company="Demo",
             description="Python FastAPI PostgreSQL APIs",
         ),
     ])
-    result = asyncio.run(agent.recommend_jobs("u", 20))
-    ids = [m["job"]["external_id"] for m in result.data["matches"]]
-    assert "ai" in ids
-    assert "backend" in ids
+    result = asyncio.run(agent.recommend_jobs("u", 15))
+    assert [m["job"]["external_id"] for m in result.data["matches"]] == ["ai"]
     assert result.data["mode"] == "resume_recommendations"
