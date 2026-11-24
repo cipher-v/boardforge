@@ -11,10 +11,10 @@ class FakeEmbeddings:
     model = "fake-v1"
 
     def __init__(self):
-        self.calls: list[list[str]] = []
+        self.calls: list[tuple[str, list[str]]] = []
 
     async def embed(self, texts: list[str], *, task_type: str = "RETRIEVAL_DOCUMENT") -> list[list[float]]:
-        self.calls.append(list(texts))
+        self.calls.append((task_type, list(texts)))
         return [[float(len(text) % 7 + 1), 1.0] for text in texts]
 
 
@@ -41,20 +41,15 @@ def run(jobs: list[Job], client: FakeEmbeddings, store: Store):
     ))
 
 
-def test_job_embeddings_are_reused_until_content_changes(tmp_path: Path):
+def test_store_backed_search_does_not_embed_missing_documents(tmp_path: Path):
     store = Store(str(tmp_path / "cache.db"))
     client = FakeEmbeddings()
     jobs = [make_job("1", "Python APIs"), make_job("2", "Distributed systems")]
 
     run(jobs, client, store)
-    assert [len(call) for call in client.calls] == [1, 2]
 
-    run(jobs, client, store)
-    assert [len(call) for call in client.calls] == [1, 2, 1]
-
-    changed = [make_job("1", "Python APIs and retrieval"), jobs[1]]
-    run(changed, client, store)
-    assert [len(call) for call in client.calls] == [1, 2, 1, 1, 1]
+    assert [task for task, _ in client.calls] == ["RETRIEVAL_QUERY"]
+    assert [len(texts) for _, texts in client.calls] == [1]
 
 
 def test_hybrid_keeps_verified_matches_ahead_of_needs_verification(tmp_path: Path):
@@ -124,7 +119,7 @@ def test_semantic_only_match_is_not_marked_recommended(tmp_path: Path):
         top_k=10,
         rejected_ids=set(),
         client=client,
-        store=store,
+        store=None,
     ))
 
     by_id = {match.job.external_id: match for match in matches}
