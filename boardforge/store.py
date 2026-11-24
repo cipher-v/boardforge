@@ -325,9 +325,19 @@ class Store:
         del query, query_vector, embedding_model, preferences
         return self.active_jobs()[:max(1, limit)]
 
-    def embedding_candidates(self, model: str, *, limit: int = 100) -> list[Job]:
+    def embedding_candidates(
+        self,
+        model: str,
+        *,
+        limit: int = 100,
+        countries: list[str] | None = None,
+    ) -> list[Job]:
         del model
-        return self.active_jobs()[:max(1, limit)]
+        jobs = self.active_jobs()
+        if countries:
+            allowed = {country.casefold() for country in countries}
+            jobs = [job for job in jobs if job.country.casefold() in allowed]
+        return jobs[:max(1, limit)]
 
     def job_status(self, stable_id: str) -> str | None:
         with self.connect() as connection:
