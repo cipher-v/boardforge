@@ -45,6 +45,13 @@ def infer_country(location: str) -> str:
 def _parse_salary(job: Job, text: str) -> None:
     if job.salary_min is not None:
         return
+    if any(phrase in text for phrase in ["unpaid", "no stipend", "without stipend"]):
+        job.salary_currency = job.salary_currency or ("INR" if job.country == "India" else "")
+        job.salary_min = 0
+        job.salary_max = 0
+        job.salary_period = "year"
+        job.salary_text = job.salary_text or "Unpaid"
+        return
     lpa = re.search(
         r"(?:₹|inr\s*)?([0-9]+(?:\.[0-9]+)?)\s*(?:-|–|to)\s*"
         r"([0-9]+(?:\.[0-9]+)?)\s*(?:lpa|lakhs?(?:\s+per\s+year)?)",

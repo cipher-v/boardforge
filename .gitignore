@@ -8,3 +8,8 @@ __pycache__/
 dist/
 build/
 *.egg-info/
+results/
+*.report.json
+agent-eval.json
+benchmark.json
+compare.json

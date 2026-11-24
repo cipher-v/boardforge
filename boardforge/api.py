@@ -12,7 +12,7 @@ from boardforge.tool_agent import ToolCallingAgent
 
 app = FastAPI(
     title="BoardForge",
-    version="0.3.0",
+    version="0.4.0",
     description="Job intelligence infrastructure: ingest, track, personalize, rank and evaluate.",
 )
 store = Store()
@@ -26,7 +26,7 @@ class SyncRequest(BaseModel):
 
 @app.get("/health")
 def health():
-    return {"status":"ok","version":"0.3.0"}
+    return {"status":"ok","version":"0.4.0"}
 
 
 @app.post("/sync")

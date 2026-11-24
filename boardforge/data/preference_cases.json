@@ -1,0 +1,26 @@
+{
+  "version": "1.0",
+  "description": "Natural-language deterministic preference extraction regression cases.",
+  "cases": [
+    {"name":"add_roles_locations","text":"I want AI or backend jobs in Bangalore","expected":{"roles":["AI/ML","Backend"],"locations":["Bengaluru"]}},
+    {"name":"remove_qa","current":{"roles":["QA","Backend"]},"text":"Do not show QA anymore","expected":{"roles":["Backend"],"avoid_terms":["qa"]}},
+    {"name":"worldwide","current":{"countries":["India"]},"text":"Worldwide roles are fine","expected":{"countries":[]}},
+    {"name":"india_only","text":"Only India-based roles","expected":{"countries":["India"]}},
+    {"name":"remote_only","text":"Remote only from now on","expected":{"remote_ok":true,"onsite_ok":false}},
+    {"name":"onsite_only","text":"Onsite only","expected":{"remote_ok":false,"onsite_ok":true}},
+    {"name":"hybrid_not_onsite","text":"I am okay with hybrid but not onsite","expected":{"remote_ok":true,"onsite_ok":false}},
+    {"name":"salary_floor","text":"I need at least 12 LPA","expected":{"min_salary_lpa":12.0}},
+    {"name":"relax_salary","current":{"min_salary_lpa":12.0},"text":"Salary matters less now","expected":{"min_salary_lpa":null}},
+    {"name":"avoid_hardware","text":"Avoid hardware-heavy jobs","expected":{"avoid_terms":["hardware"]}},
+    {"name":"paid_only","text":"No unpaid internships","expected":{"paid_only":true}},
+    {"name":"experience_ceiling","text":"Avoid roles requiring more than 2 years","expected":{"max_required_experience_years":2.0}},
+    {"name":"add_pune","current":{"locations":["Bengaluru"]},"text":"Pune is fine too","expected":{"locations":["Bengaluru","Pune"]}},
+    {"name":"avoid_internships","text":"I don't want internships anymore","expected":{"avoid_terms":["internships"]}},
+    {"name":"negative_then_positive","text":"Not QA, but AI and backend are good","expected":{"roles":["AI/ML","Backend"],"avoid_terms":["qa"]}},
+    {"name":"data_engineering","text":"Show data engineer roles","expected":{"roles":["Data Engineering"]}},
+    {"name":"software_engineering","text":"I want software engineer jobs","expected":{"roles":["Software Engineering"]}},
+    {"name":"computer_vision","text":"Computer vision roles in Bengaluru","expected":{"roles":["Computer Vision"],"locations":["Bengaluru"]}},
+    {"name":"gurgaon_alias","text":"Backend jobs in Gurgaon","expected":{"roles":["Backend"],"locations":["Gurugram"]}},
+    {"name":"any_country","current":{"countries":["India"]},"text":"Any country is okay","expected":{"countries":[]}}
+  ]
+}

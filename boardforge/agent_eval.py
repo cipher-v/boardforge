@@ -2,45 +2,19 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from pathlib import Path
 from typing import Any
 
 import httpx
 
 from boardforge.tool_agent import TOOLS
+from boardforge.planning import tool_names
 
 
 DEFAULT_PATH = Path(__file__).resolve().parent / "data" / "agent_tools.json"
 
-SEARCH_CUES = re.compile(
-    r"\b(find|search|show|openings?|alternatives?|anything|what matches|what are|any good|similar)\b",
-    re.I,
-)
-PREFERENCE_CUES = re.compile(
-    r"\b(do not|don't|dont|not|no|avoid|exclude|remove|stop showing|only|from now on|minimum|at least|changed my mind|"
-    r"salary matters|okay with|lower priority|focus on|want internships|want remote|worldwide|onsite|hybrid)\b",
-    re.I,
-)
-NEGATED_SHOW_CUES = re.compile(r"\b(do not|don't|dont|stop)\s+show(?:ing)?\b", re.I)
-FEEDBACK_CUES = re.compile(r"\b(reject|ignore|save|applied|interview|mark)\b", re.I)
-JOB_ID_CUE = re.compile(r"\b[\w-]+:[\w-]+:[\w-]+\b")
-
-
 def deterministic_tool_plan(text: str) -> list[str]:
-    tools: list[str] = []
-    if FEEDBACK_CUES.search(text) and JOB_ID_CUE.search(text):
-        tools.append("record_feedback")
-    if PREFERENCE_CUES.search(text):
-        tools.append("update_preferences")
-    search_requested = bool(SEARCH_CUES.search(text))
-    if NEGATED_SHOW_CUES.search(text):
-        search_requested = bool(re.search(r"\b(find|search|show me|openings?|alternatives?|similar)\b", text, re.I))
-    if search_requested:
-        tools.append("search_jobs")
-    if not tools:
-        tools.append("search_jobs")
-    return tools
+    return tool_names(text)
 
 
 def _sequence_metrics(predicted: list[str], expected: list[str]) -> dict[str, float | bool]:

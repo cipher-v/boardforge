@@ -9,6 +9,7 @@ from boardforge.agent import JobAgent
 from boardforge.agent_eval import run_deterministic_tool_eval, run_llm_tool_eval
 from boardforge.benchmark import run_benchmark
 from boardforge.comparison import comparison_markdown, run_comparison, run_embedding_comparison
+from boardforge.preference_eval import run_preference_eval
 from boardforge.discovery.har import discover_from_har
 from boardforge.discovery.manifest import ConnectorManifest
 from boardforge.connectors.manifest import fetch_manifest
@@ -63,6 +64,9 @@ def main() -> None:
     p_agent_llm = sub.add_parser("agent-eval-llm")
     p_agent_llm.add_argument("--dataset", default=None)
 
+    p_preference_eval = sub.add_parser("preference-eval")
+    p_preference_eval.add_argument("--dataset", default=None)
+
     args = parser.parse_args()
 
     if args.cmd == "benchmark":
@@ -95,6 +99,11 @@ def main() -> None:
 
     if args.cmd == "agent-eval-llm":
         out = asyncio.run(run_llm_tool_eval(args.dataset) if args.dataset else run_llm_tool_eval())
+        _print_json(out)
+        return
+
+    if args.cmd == "preference-eval":
+        out = run_preference_eval(args.dataset) if args.dataset else run_preference_eval()
         _print_json(out)
         return
 

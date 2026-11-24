@@ -11,6 +11,7 @@ BoardForge evaluates the system at five layers.
 
 ## Ranking
 - Precision@K
+- precision among returned results
 - Recall@K
 - NDCG@K
 - forbidden-result rate
@@ -33,6 +34,8 @@ BoardForge evaluates the system at five layers.
 - unnecessary tool calls
 - missing preference updates
 - missing feedback writes
+
+The deterministic benchmark and the production fallback share the same planner. Integration tests execute planned tools against a temporary store and verify preference and feedback state changes, not only tool names.
 
 ## Ranking benchmark
 
@@ -96,7 +99,7 @@ The packaged `boardforge/data/agent_tools.json` dataset contains **40 tool-selec
 - feedback + search
 - natural conversational variants
 
-The deterministic policy is always available as a baseline.
+The deterministic policy is the production no-key fallback as well as the baseline, preventing evaluation/production planner drift.
 
 Optional LLM planner evaluation:
 
@@ -105,7 +108,21 @@ set OPENAI_API_KEY=...
 python -m boardforge.cli agent-eval-llm
 ```
 
-The LLM evaluation selects tools without executing them, so the benchmark does not mutate user state.
+The LLM evaluation is a planning-only benchmark: it selects tools without executing them, so it does not mutate user state. Production tool-loop behavior is tested separately.
+
+## Preference extraction benchmark
+
+```bash
+python -m boardforge.cli preference-eval
+```
+
+The packaged 20-case suite checks natural-language additions, removals, negation, aliases, geography changes, salary relaxation, experience ceilings and work-policy changes. It compares extracted preference fields against versioned expected state.
+
+## Metric definitions
+
+- `Precision@K` uses the conventional denominator `K`.
+- `precision_among_returned` divides by the number of results actually returned.
+- `Recall@K` may be below 1.0 when a case has more than K relevant jobs; interpret it alongside precision among returned and empty-result rate.
 
 ## Interpretation
 

@@ -6,7 +6,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable
 
-from boardforge.evals import ndcg_at_k, precision_at_k, recall_at_k
+from boardforge.evals import ndcg_at_k, precision_among_returned, precision_at_k, recall_at_k
 from boardforge.matching import hard_violations, lexical_score, rank_jobs, role_evidence
 from boardforge.models import Job, Match, Preferences
 from boardforge.semantic import EmbeddingClient, hybrid_rank_jobs
@@ -73,6 +73,7 @@ def _case_metrics(matches: list[Match], case: dict[str, Any], top_k: int) -> dic
     return {
         "predicted": predicted,
         "precision_at_k": precision_at_k(predicted, relevant, top_k) if relevant else 0.0,
+        "precision_among_returned": precision_among_returned(predicted, relevant, top_k) if relevant else 0.0,
         "recall_at_k": recall_at_k(predicted, relevant, top_k) if relevant else 0.0,
         "ndcg_at_k": ndcg_at_k(predicted, relevant, top_k) if relevant else 0.0,
         "forbidden_rate": len(forbidden_hits) / len(predicted) if predicted else 0.0,
@@ -85,7 +86,7 @@ def _case_metrics(matches: list[Match], case: dict[str, Any], top_k: int) -> dic
 def _aggregate(rows: list[dict[str, Any]]) -> dict[str, float]:
     if not rows:
         return {}
-    metrics = ["precision_at_k", "recall_at_k", "ndcg_at_k", "forbidden_rate"]
+    metrics = ["precision_at_k", "precision_among_returned", "recall_at_k", "ndcg_at_k", "forbidden_rate"]
     out = {name: sum(float(row[name]) for row in rows) / len(rows) for name in metrics}
     out["top1_accuracy"] = sum(bool(row["top1_relevant"]) for row in rows) / len(rows)
     out["empty_rate"] = sum(bool(row["empty"]) for row in rows) / len(rows)
@@ -193,13 +194,13 @@ def comparison_markdown(report: dict[str, Any]) -> str:
         "",
         f"Dataset: v{report['dataset_version']} — {report['cases']} cases / {report['jobs']} jobs",
         "",
-        f"| Variant | P@{report['top_k']} | Recall@{report['top_k']} | NDCG@{report['top_k']} | Forbidden | Top-1 | Empty |",
-        "|---|---:|---:|---:|---:|---:|---:|",
+        f"| Variant | P@{report['top_k']} | P/returned | Recall@{report['top_k']} | NDCG@{report['top_k']} | Forbidden | Top-1 | Empty |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for name, data in report["variants"].items():
         m = data["macro"]
         lines.append(
-            f"| {name} | {m['precision_at_k']:.3f} | {m['recall_at_k']:.3f} | "
+            f"| {name} | {m['precision_at_k']:.3f} | {m['precision_among_returned']:.3f} | {m['recall_at_k']:.3f} | "
             f"{m['ndcg_at_k']:.3f} | {m['forbidden_rate']:.3f} | "
             f"{m['top1_accuracy']:.3f} | {m['empty_rate']:.3f} |"
         )

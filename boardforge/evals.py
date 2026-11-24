@@ -6,6 +6,11 @@ from boardforge.models import Match
 
 def precision_at_k(predicted: list[str], relevant: set[str], k: int) -> float:
     top = predicted[:k]
+    return 0.0 if k <= 0 else sum(x in relevant for x in top) / k
+
+
+def precision_among_returned(predicted: list[str], relevant: set[str], k: int) -> float:
+    top = predicted[:k]
     return 0.0 if not top else sum(x in relevant for x in top) / len(top)
 
 

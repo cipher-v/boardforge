@@ -56,6 +56,15 @@ CREATE TABLE IF NOT EXISTS sync_runs (
   closed INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS job_embeddings (
+  stable_id TEXT NOT NULL,
+  model TEXT NOT NULL,
+  content_hash TEXT NOT NULL,
+  vector TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(stable_id, model)
+);
+
 CREATE TABLE IF NOT EXISTS profiles (
   profile_id TEXT PRIMARY KEY,
   preferences TEXT NOT NULL,
@@ -247,6 +256,37 @@ class Store:
                 (stable_id,),
             ).fetchall()
         return [row["event_type"] for row in rows]
+
+    def load_embedding(self, stable_id: str, model: str, content_hash: str) -> list[float] | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                """SELECT vector FROM job_embeddings
+                   WHERE stable_id=? AND model=? AND content_hash=?""",
+                (stable_id, model, content_hash),
+            ).fetchone()
+        if row is None:
+            return None
+        import json
+        return [float(value) for value in json.loads(row["vector"])]
+
+    def save_embedding(
+        self,
+        stable_id: str,
+        model: str,
+        content_hash: str,
+        vector: list[float],
+    ) -> None:
+        import json
+        with self.connect() as connection:
+            connection.execute(
+                """INSERT INTO job_embeddings(stable_id,model,content_hash,vector,updated_at)
+                   VALUES(?,?,?,?,?)
+                   ON CONFLICT(stable_id,model) DO UPDATE SET
+                     content_hash=excluded.content_hash,
+                     vector=excluded.vector,
+                     updated_at=excluded.updated_at""",
+                (stable_id, model, content_hash, json.dumps(vector), _utcnow()),
+            )
 
     def save_preferences(self, profile_id: str, preferences: Preferences) -> None:
         with self.connect() as connection:

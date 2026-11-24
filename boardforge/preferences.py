@@ -21,7 +21,7 @@ ROLE_MAP = {
 }
 
 CITIES = ["bengaluru","bangalore","pune","hyderabad","gurugram","gurgaon","mumbai","noida","chennai","delhi"]
-NEGATION_RE = re.compile(r"\b(?:do not|don't|dont|avoid|exclude|remove|stop showing|not interested in|no)\b")
+NEGATION_RE = re.compile(r"\b(?:do not|don't|dont|not|avoid|exclude|remove|stop showing|not interested in|no)\b")
 
 
 def _is_negated(text: str, start: int) -> bool:
@@ -59,7 +59,7 @@ def deterministic_extract(text: str, current: Preferences | None = None) -> Pref
             else:
                 _append_unique(p.roles, canonical)
 
-    for term in ["sales", "hardware", "embedded", "unpaid"]:
+    for term in ["sales", "hardware", "embedded", "unpaid", "internship", "internships"]:
         match = re.search(rf"\b{re.escape(term)}\b", low)
         if match and _is_negated(low, match.start()):
             _append_unique(p.avoid_terms, term)
@@ -91,6 +91,12 @@ def deterministic_extract(text: str, current: Preferences | None = None) -> Pref
     if "remote only" in low:
         p.remote_ok = True
         p.onsite_ok = False
+    if any(phrase in low for phrase in ["not onsite", "not on-site", "avoid onsite", "avoid on-site"]):
+        p.remote_ok = True
+        p.onsite_ok = False
+
+    if any(phrase in low for phrase in ["salary matters less", "salary doesn't matter", "salary does not matter", "no minimum salary"]):
+        p.min_salary_lpa = None
 
     if "india" in low and "outside india" not in low:
         p.countries = ["India"]
@@ -98,6 +104,32 @@ def deterministic_extract(text: str, current: Preferences | None = None) -> Pref
         p.countries = []
 
     return _reconcile(p)
+
+
+def effective_search_preferences(current: Preferences, text: str) -> Preferences:
+    """Overlay explicit one-off query constraints without persisting them."""
+    transient = deterministic_extract(text, Preferences())
+    effective = current.model_copy(deep=True)
+    low = text.casefold()
+
+    if transient.roles:
+        effective.roles = transient.roles
+    if transient.locations:
+        effective.locations = transient.locations
+    if any(term in low for term in ["india", "worldwide", "any country"]):
+        effective.countries = transient.countries
+    if transient.min_salary_lpa is not None:
+        effective.min_salary_lpa = transient.min_salary_lpa
+    if transient.max_required_experience_years is not None:
+        effective.max_required_experience_years = transient.max_required_experience_years
+    if transient.paid_only:
+        effective.paid_only = True
+    if any(term in low for term in ["remote", "onsite", "on-site"]):
+        effective.remote_ok = transient.remote_ok
+        effective.onsite_ok = transient.onsite_ok
+    for term in transient.avoid_terms:
+        _append_unique(effective.avoid_terms, term)
+    return _reconcile(effective)
 
 
 class LLMPreferenceExtractor:

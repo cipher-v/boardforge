@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from boardforge.evals import ndcg_at_k, precision_at_k, recall_at_k
+from boardforge.evals import ndcg_at_k, precision_among_returned, precision_at_k, recall_at_k
 from boardforge.matching import rank_jobs
 from boardforge.models import Job, Preferences
 
@@ -39,6 +39,7 @@ def run_benchmark(path: str | Path = DEFAULT_PATH, top_k: int = 5) -> dict[str, 
         if relevant:
             row.update({
                 "precision_at_k": precision_at_k(predicted, relevant, top_k),
+                "precision_among_returned": precision_among_returned(predicted, relevant, top_k),
                 "recall_at_k": recall_at_k(predicted, relevant, top_k),
                 "ndcg_at_k": ndcg_at_k(predicted, relevant, top_k),
             })
@@ -47,7 +48,7 @@ def run_benchmark(path: str | Path = DEFAULT_PATH, top_k: int = 5) -> dict[str, 
     scored = [row for row in results if "precision_at_k" in row]
     macro = {
         metric: sum(row[metric] for row in scored) / len(scored) if scored else 0.0
-        for metric in ["precision_at_k", "recall_at_k", "ndcg_at_k"]
+        for metric in ["precision_at_k", "precision_among_returned", "recall_at_k", "ndcg_at_k"]
     }
     macro["forbidden_rate"] = (
         sum(row["forbidden_rate"] for row in results) / len(results) if results else 0.0

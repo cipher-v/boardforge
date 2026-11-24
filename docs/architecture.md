@@ -12,6 +12,8 @@ BoardForge separates deterministic infrastructure from probabilistic model behav
 6. **Ranker** applies hard constraints first, then relevance and preference evidence.
 7. **API/agent** exposes sync, preference update, search and feedback tools.
 
+When embeddings are enabled, job vectors are cached in the store by stable job ID, embedding model and content hash. Queries are embedded per request; unchanged job documents reuse their stored vectors, while changed documents are re-embedded automatically.
+
 ## Why temporal indexing matters
 
 A job index is not a static dataset. Roles appear, change, get reposted and close. BoardForge records discovery, update, closure and reopening events. A job must be absent from two consecutive successful syncs before it closes; empty and abnormal source shrinkage is rejected.
@@ -39,6 +41,6 @@ Learned manifests are declarative and limited to public GET endpoints. Private/l
 ## Next architecture milestone
 
 - persistent full-text and vector indexes
-- incremental embeddings keyed by content hash
+- pgvector candidate retrieval over the existing content-hash-keyed embedding cache
 - scheduled source syncs with operational metrics
 - larger ranking and tool-use evaluation datasets

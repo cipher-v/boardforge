@@ -1,6 +1,6 @@
 [project]
 name = "boardforge"
-version = "0.3.0"
+version = "0.4.0"
 description = "Self-learning job intelligence infrastructure with ATS connectors, temporal indexing, personalization and evals."
 requires-python = ">=3.11"
 dependencies = [

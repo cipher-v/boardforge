@@ -109,7 +109,10 @@ def hard_violations(job: Job, preferences: Preferences) -> list[str]:
 
     if preferences.min_salary_lpa is not None:
         known_lpa = salary_min_lpa(job)
-        if known_lpa is not None and known_lpa < preferences.min_salary_lpa:
+        explicitly_unpaid = any(phrase in text for phrase in ["unpaid", "no stipend", "without stipend"])
+        if explicitly_unpaid and preferences.min_salary_lpa > 0:
+            violations.append("salary")
+        elif known_lpa is not None and known_lpa < preferences.min_salary_lpa:
             violations.append("salary")
 
     if preferences.max_required_experience_years is not None and job.min_experience_years is not None:

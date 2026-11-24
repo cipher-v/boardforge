@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import math
 import os
+import hashlib
 import httpx
 
 from boardforge.matching import job_text, rank_jobs
 from boardforge.models import Job, Match, Preferences
+from boardforge.store import Store
 
 
 def cosine(a: list[float], b: list[float]) -> float:
@@ -46,18 +48,44 @@ async def hybrid_rank_jobs(
     top_k: int,
     rejected_ids: set[str],
     client: EmbeddingClient,
+    store: Store | None = None,
 ) -> list[Match]:
     baseline = rank_jobs(jobs, prefs, query=query, top_k=len(jobs), rejected_ids=rejected_ids)
     if not baseline or not client.enabled:
         return baseline[:top_k]
 
     qtext = " ".join(prefs.roles + prefs.locations + prefs.prefer_terms + [query])
-    texts = [qtext] + [job_text(m.job)[:6000] for m in baseline]
-    vectors = await client.embed(texts)
-    qv = vectors[0]
+    qv = (await client.embed([qtext]))[0]
+    documents = [job_text(match.job)[:6000] for match in baseline]
+    vectors: list[list[float] | None] = [None] * len(documents)
+    missing_indexes: list[int] = []
+    content_hashes = [hashlib.sha256(text.encode("utf-8")).hexdigest() for text in documents]
+
+    for index, (match, content_hash) in enumerate(zip(baseline, content_hashes)):
+        cached = store.load_embedding(match.job.stable_id, client.model, content_hash) if store else None
+        if cached is None:
+            missing_indexes.append(index)
+        else:
+            vectors[index] = cached
+
+    if missing_indexes:
+        embedded = await client.embed([documents[index] for index in missing_indexes])
+        if len(embedded) != len(missing_indexes):
+            raise RuntimeError("embedding provider returned an unexpected vector count")
+        for index, vector in zip(missing_indexes, embedded):
+            vectors[index] = vector
+            if store:
+                store.save_embedding(
+                    baseline[index].job.stable_id,
+                    client.model,
+                    content_hashes[index],
+                    vector,
+                )
 
     rescored = []
-    for match, vec in zip(baseline, vectors[1:]):
+    for match, vec in zip(baseline, vectors):
+        if vec is None:  # pragma: no cover - guarded by cache/fetch paths above
+            continue
         semantic = cosine(qv, vec)
         match.score = round((0.55 * match.score) + (0.45 * semantic), 4)
         if semantic > 0.45:

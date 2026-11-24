@@ -30,3 +30,6 @@ def test_parses_lpa_and_monthly_inr_salary():
 
     monthly = enrich_job(base(description="Stipend: ₹75,000 per month"))
     assert salary_min_lpa(monthly) == 9
+
+    unpaid = enrich_job(base(location="Pune, India", description="Unpaid internship. No stipend."))
+    assert salary_min_lpa(unpaid) == 0

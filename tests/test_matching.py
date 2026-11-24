@@ -109,3 +109,10 @@ def test_unknown_salary_is_demoted_when_minimum_salary_is_requested():
     ranked = rank_jobs([unknown, known], p, query="AI")
     assert ranked[0].job.external_id == "known"
     assert ranked[1].status == "needs_verification"
+
+
+def test_explicitly_unpaid_is_below_positive_salary_floor():
+    p = Preferences(roles=["AI/ML"], countries=["India"], min_salary_lpa=12)
+    unpaid = job("unpaid", "ML Engineer", desc="Unpaid internship. No stipend.")
+    assert "salary" in hard_violations(unpaid, p)
+    assert rank_jobs([unpaid], p) == []

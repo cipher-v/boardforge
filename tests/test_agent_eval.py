@@ -21,7 +21,8 @@ def test_tool_planner_feedback_then_search():
 def test_agent_tool_dataset_has_40_cases():
     report = run_deterministic_tool_eval()
     assert report["cases"] == 40
-    assert 0.0 <= report["macro"]["exact_sequence_accuracy"] <= 1.0
+    assert report["macro"]["exact_sequence_accuracy"] >= 0.95
+    assert report["macro"]["tool_set_f1"] >= 0.95
 
 
 def test_tool_planner_negated_show_is_preference_only():

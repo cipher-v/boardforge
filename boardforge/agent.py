@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from boardforge.models import FeedbackRequest
-from boardforge.preferences import LLMPreferenceExtractor
+from boardforge.planning import plan_tools
+from boardforge.preferences import LLMPreferenceExtractor, effective_search_preferences
 from boardforge.semantic import EmbeddingClient, hybrid_rank_jobs
 from boardforge.store import Store
 
@@ -33,7 +34,8 @@ class JobAgent:
         return AgentResult("Preferences updated.", updated.model_dump())
 
     async def search_jobs(self, profile_id: str, query: str = "", top_k: int = 10) -> AgentResult:
-        prefs = self.store.load_preferences(profile_id)
+        saved = self.store.load_preferences(profile_id)
+        prefs = effective_search_preferences(saved, query) if query else saved
         matches = await hybrid_rank_jobs(
             self.store.active_jobs(),
             prefs,
@@ -41,6 +43,7 @@ class JobAgent:
             top_k=top_k,
             rejected_ids=self.store.rejected_job_ids(profile_id),
             client=self.embeddings,
+            store=self.store,
         )
         return AgentResult(
             f"Found {len(matches)} ranked jobs.",
@@ -52,7 +55,29 @@ class JobAgent:
         return AgentResult("Feedback recorded.", req.model_dump())
 
     async def handle(self, profile_id: str, text: str, top_k: int = 10) -> AgentResult:
-        low = text.lower()
-        if any(x in low for x in ["don't show","do not show","prefer","i want","avoid","only","remote"]):
-            await self.update_preferences(profile_id, text)
-        return await self.search_jobs(profile_id, query=text, top_k=top_k)
+        data: dict = {"trace": []}
+        executed: list[str] = []
+        for planned in plan_tools(text, top_k=top_k):
+            data["trace"].append({"tool": planned.name, "arguments": planned.arguments})
+            executed.append(planned.name)
+            if planned.name == "update_preferences":
+                result = await self.update_preferences(profile_id, planned.arguments["text"])
+                data["preferences"] = result.data
+            elif planned.name == "record_feedback":
+                result = await self.record_feedback(FeedbackRequest(
+                    profile_id=profile_id,
+                    job_id=planned.arguments["job_id"],
+                    verdict=planned.arguments["verdict"],
+                    note=planned.arguments.get("note", ""),
+                ))
+                data["feedback"] = result.data
+            elif planned.name == "search_jobs":
+                result = await self.search_jobs(
+                    profile_id,
+                    planned.arguments.get("query", text),
+                    planned.arguments.get("top_k", top_k),
+                )
+                data.update(result.data)
+            else:  # pragma: no cover - planner emits only registered tools
+                raise ValueError(f"unknown planned tool: {planned.name}")
+        return AgentResult(f"Executed: {', '.join(executed)}.", data)

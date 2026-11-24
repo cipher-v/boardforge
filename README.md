@@ -17,6 +17,7 @@ It is intentionally not another generic RAG demo or auto-apply bot.
 - Normalizes INR salary ranges and conservative geography metadata
 - Filters hard constraints before ranking and rejects unknown geography when required
 - Produces structured evidence-backed reasons and risk flags
+- Persists job embeddings by model and content hash so unchanged jobs are not re-embedded
 - Exposes sync, preference, search, feedback and agent APIs
 - Includes an executable starter benchmark, ranking/stability metrics and CI tests
 - Optionally uses an OpenAI-compatible model for structured preference extraction
@@ -180,7 +181,7 @@ This lets the system answer a more useful question than “what jobs exist?”:
 
 ## Evaluation
 
-Run `python -m boardforge.cli benchmark` for the 120-case adversarial ranking suite. Run `python -m boardforge.cli compare --markdown-out results/ranking.md` for lexical → constrained → evidence → feedback ablations, and `python -m boardforge.cli agent-eval` for the 40-case tool-selection suite. These datasets are synthetic regression/evaluation fixtures, not claims of real-user product quality.
+Run `python -m boardforge.cli benchmark` for the 120-case adversarial ranking suite. Run `python -m boardforge.cli compare --markdown-out results/ranking.md` for lexical → constrained → evidence → feedback ablations, `python -m boardforge.cli agent-eval` for the 40-case production-fallback tool planner, and `python -m boardforge.cli preference-eval` for natural-language preference extraction. These datasets are synthetic regression/evaluation fixtures, not claims of real-user product quality.
 
 See [docs/evaluation.md](docs/evaluation.md).
 
