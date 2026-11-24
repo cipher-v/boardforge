@@ -375,7 +375,7 @@ async def hybrid_rank_jobs(
             match.status = "needs_verification"
             risk = (
                 "query-specific relevance not verified"
-                if specific_topic_terms
+                if specific_topic_terms and has_role_evidence
                 else "semantic-only relevance; no concrete query or role evidence"
             )
             if risk not in match.risks:
