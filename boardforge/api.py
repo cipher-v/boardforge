@@ -8,7 +8,7 @@ from pydantic import BaseModel, HttpUrl
 
 from boardforge.agent import JobAgent
 from boardforge.discovery import discover_and_sync
-from boardforge.models import FeedbackRequest, PreferenceUpdate, SearchRequest
+from boardforge.models import CandidateProfile, FeedbackRequest, PreferenceUpdate, SearchRequest
 from boardforge.resume import extract_candidate_profile, extract_resume_text
 from boardforge.store import Store
 from boardforge.sync import sync_url
@@ -96,9 +96,7 @@ async def recommendations(profile_id: str, top_k: int = 15):
 
 @app.post("/discover/{profile_id}")
 async def discover(profile_id: str, req: SearchRequest):
-    profile = store.load_candidate_profile(profile_id)
-    if profile is None:
-        raise HTTPException(status_code=400, detail="upload a resume before online discovery")
+    profile = store.load_candidate_profile(profile_id) or CandidateProfile()
     report = await discover_and_sync(
         store,
         profile,
