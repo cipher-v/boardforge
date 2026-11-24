@@ -39,7 +39,7 @@ def test_postgres_store_migrations_fts_vectors_and_state():
         assert summary.inserted == 3
         assert store.candidate_jobs("Python FastAPI", limit=2)[0].external_id == "backend"
 
-        vector = [0.0] * 1536
+        vector = [0.0] * 768
         vector[0] = 1.0
         store.save_embedding(backend.stable_id, "test-model", "hash", vector)
         assert store.load_embedding(backend.stable_id, "test-model", "hash") == vector
