@@ -101,8 +101,7 @@
       "query": "computer vision engineer biometrics face recognition India",
       "relevance_grades": {
         "greenhouse:jumio:4664041005": 2,
-        "greenhouse:jumio:4713139005": 2,
-        "greenhouse:jumio:4665626005": 1
+        "greenhouse:jumio:4713139005": 2
       },
       "forbidden_ids": [
         "greenhouse:jumio:4665626005"
