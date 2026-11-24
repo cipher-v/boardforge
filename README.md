@@ -134,16 +134,27 @@ profile-ownership boundary.
 
 ## Optional background web discovery
 
-Search always returns from the current index first. With Brave discovery enabled,
+Search always returns from the current index first. With Tavily configured,
 BoardForge queues a deduplicated discovery request, records source provenance,
-syncs newly found Greenhouse/Lever/Ashby boards after the response, and lets the UI
+discovers Greenhouse/Lever/Ashby boards with one Basic search request restricted
+to supported ATS domains, syncs those boards after the response, and lets the UI
 poll for a refreshed result set.
 
 ```text
-BOARDFORGE_ENABLE_WEB_DISCOVERY=1
-BOARDFORGE_BRAVE_API_KEY=...
+BOARDFORGE_SEARCH_PROVIDER=tavily
+TAVILY_API_KEY=...
 BOARDFORGE_DISCOVERY_TTL_SECONDS=900
 ```
+
+Brave remains an optional fallback provider:
+
+```text
+BOARDFORGE_SEARCH_PROVIDER=brave
+BOARDFORGE_BRAVE_API_KEY=...
+```
+
+Do not commit real API keys. Keep them in the local shell, a local `.env` file,
+or the deployment platform's secret manager.
 
 The FastAPI demo executes queued work in-process. Request state is durable and a
 separate process can drain/recover pending work with:
