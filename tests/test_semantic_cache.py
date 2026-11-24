@@ -13,7 +13,7 @@ class FakeEmbeddings:
     def __init__(self):
         self.calls: list[list[str]] = []
 
-    async def embed(self, texts: list[str]) -> list[list[float]]:
+    async def embed(self, texts: list[str], *, task_type: str = "RETRIEVAL_DOCUMENT") -> list[list[float]]:
         self.calls.append(list(texts))
         return [[float(len(text) % 7 + 1), 1.0] for text in texts]
 
