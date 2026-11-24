@@ -73,6 +73,8 @@ def _contains_phrase(text: str, phrase: str) -> bool:
 
 def role_evidence(job: Job, role: str) -> MatchEvidence | None:
     title = " ".join(job.title.lower().split())
+    if role == "AI/ML" and re.search(r"\b(?:hardware|embedded|firmware)\b", title, re.I):
+        return None
     patterns = ROLE_PATTERNS.get(role)
     if patterns:
         for pattern in patterns:
