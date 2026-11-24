@@ -4,12 +4,13 @@ import asyncio
 import hashlib
 import math
 import os
+import re
 from typing import Protocol
 
 import httpx
 
 from boardforge.database import StoreProtocol
-from boardforge.matching import job_text, query_text, rank_jobs
+from boardforge.matching import job_text, lexical_score, query_text, rank_jobs
 from boardforge.models import Job, Match, Preferences
 
 
@@ -23,6 +24,33 @@ def cosine(a: list[float], b: list[float]) -> float:
     na = math.sqrt(sum(x * x for x in a))
     nb = math.sqrt(sum(x * x for x in b))
     return 0.0 if na == 0 or nb == 0 else dot / (na * nb)
+
+
+def semantic_query_text(preferences: Preferences, query: str = "") -> str:
+    """Keep semantic retrieval focused on role/skill intent, not hard-filter tokens."""
+    cleaned = query
+    for term in [*preferences.countries, *preferences.locations]:
+        if term:
+            cleaned = re.sub(
+                rf"(?<!\w){re.escape(term)}(?!\w)",
+                " ",
+                cleaned,
+                flags=re.IGNORECASE,
+            )
+    cleaned = re.sub(
+        r"\b(?:remote|remote-only|onsite|on-site|onsite-only|hybrid)\b",
+        " ",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"\b\d+(?:\.\d+)?\s*(?:lpa|lakhs?|lakh)\b",
+        " ",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    parts = [*preferences.roles, *preferences.prefer_terms, " ".join(cleaned.split())]
+    return " ".join(part for part in parts if part).strip()
 
 
 class EmbeddingProvider(Protocol):
@@ -271,7 +299,7 @@ async def hybrid_rank_jobs(
     if not baseline or not client.enabled:
         return baseline[:top_k]
 
-    qtext = query_text(prefs, query)
+    qtext = semantic_query_text(prefs, query)
     try:
         qv = query_vector or (
             await client.embed([qtext], task_type=RETRIEVAL_QUERY)
@@ -324,9 +352,22 @@ async def hybrid_rank_jobs(
         if vector is None:  # pragma: no cover
             continue
         semantic = cosine(qv, vector)
+        lexical = lexical_score(match.job, prefs, query)
         match.score = round((0.55 * match.score) + (0.45 * semantic), 4)
+
         if semantic > 0.45:
-            match.reasons.append("semantic similarity supports the match")
+            match.reasons.append(f"semantic similarity score {semantic:.3f}")
+
+        topical_evidence = lexical > 0 or any(
+            item.kind in {"role", "preferred_term"} for item in match.evidence
+        )
+        if query.strip() and not topical_evidence:
+            match.status = "needs_verification"
+            if "semantic-only relevance; no lexical or role evidence" not in match.risks:
+                match.risks.append(
+                    "semantic-only relevance; no lexical or role evidence"
+                )
+
         rescored.append(match)
 
     rescored.sort(
@@ -350,7 +391,7 @@ async def retrieve_and_rank_jobs(
     client: EmbeddingClient,
     candidate_limit: int,
 ) -> tuple[list[Match], dict]:
-    retrieval_query = query_text(prefs, query).strip()
+    retrieval_query = semantic_query_text(prefs, query)
     query_vector: list[float] | None = None
     semantic_retrieval = False
     if client.enabled and retrieval_query:
