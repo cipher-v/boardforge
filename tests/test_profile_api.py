@@ -20,8 +20,9 @@ def test_resume_profile_can_be_reviewed_and_deleted(tmp_path, monkeypatch):
     monkeypatch.setattr(api, "store", store)
     monkeypatch.setattr(api, "core_agent", agent)
     monkeypatch.setattr(api, "tool_agent", ToolCallingAgent(agent))
+    monkeypatch.setenv("BOARDFORGE_SEARCH_PROVIDER", "none")
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
     monkeypatch.delenv("BOARDFORGE_BRAVE_API_KEY", raising=False)
-    monkeypatch.delenv("BOARDFORGE_ENABLE_WEB_DISCOVERY", raising=False)
     client = TestClient(api.app)
 
     uploaded = client.post(
