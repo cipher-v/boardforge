@@ -179,12 +179,7 @@ drop.addEventListener('drop',e=>uploadResume(e.dataTransfer.files[0]));
 async function search(){
   const b=$('searchBtn');b.disabled=true;$('searchStatus').textContent='Searching…';
   try{
-    let d;
-    if(hasProfile){
-      d=await api('/discover/'+encodeURIComponent(profileId),{profile_id:profileId,query:$('query').value,top_k:15});
-    }else{
-      d=await api('/search',{profile_id:profileId,query:$('query').value,top_k:15});
-    }
+    const d=await api('/discover/'+encodeURIComponent(profileId),{profile_id:profileId,query:$('query').value,top_k:15});
     render(d.matches);
     const discovery=d.discovery||{};
     $('searchStatus').textContent=d.matches.length+' relevant matches'
