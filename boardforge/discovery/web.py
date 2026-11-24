@@ -39,6 +39,50 @@ ROLE_TERMS: dict[str, tuple[str, ...]] = {
 }
 
 
+class SearchProviderError(RuntimeError):
+    retryable = False
+
+    def __init__(self, message: str, *, status_code: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class SearchProviderAuthError(SearchProviderError):
+    retryable = False
+
+
+class SearchProviderRateLimitError(SearchProviderError):
+    retryable = True
+
+
+class SearchProviderTransientError(SearchProviderError):
+    retryable = True
+
+
+class SearchProviderRequestError(SearchProviderError):
+    retryable = False
+
+
+def _provider_http_error(provider: str, response: httpx.Response) -> None:
+    status = response.status_code
+    if status in {401, 403}:
+        raise SearchProviderAuthError(
+            f"{provider} authentication failed ({status})", status_code=status
+        )
+    if status == 429:
+        raise SearchProviderRateLimitError(
+            f"{provider} rate limit reached ({status})", status_code=status
+        )
+    if 500 <= status:
+        raise SearchProviderTransientError(
+            f"{provider} server error ({status})", status_code=status
+        )
+    if 400 <= status:
+        raise SearchProviderRequestError(
+            f"{provider} request failed ({status})", status_code=status
+        )
+
+
 class SearchProvider(Protocol):
     enabled: bool
     name: str
@@ -57,6 +101,8 @@ class DiscoveryReport:
     jobs_fetched: int = 0
     failures: int = 0
     reason: str = ""
+    retryable: bool = False
+    error_kind: str = ""
 
     def as_dict(self) -> dict:
         return {
@@ -68,6 +114,8 @@ class DiscoveryReport:
             "jobs_fetched": self.jobs_fetched,
             "failures": self.failures,
             "reason": self.reason,
+            "retryable": self.retryable,
+            "error_kind": self.error_kind,
         }
 
 
@@ -92,16 +140,19 @@ class TavilyDiscoveryClient:
             "include_raw_content": False,
             "include_images": False,
         }
-        async with httpx.AsyncClient(timeout=20) as client:
-            response = await client.post(
-                self.endpoint,
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-            )
-        response.raise_for_status()
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                response = await client.post(
+                    self.endpoint,
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                )
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            raise SearchProviderTransientError(f"tavily network failure: {exc}") from exc
+        _provider_http_error(self.name, response)
         return [
             item.get("url", "")
             for item in response.json().get("results", [])
@@ -134,9 +185,12 @@ class BraveDiscoveryClient:
             "search_lang": "en",
             "safesearch": "moderate",
         }
-        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
-            response = await client.get(self.endpoint, headers=headers, params=params)
-        response.raise_for_status()
+        try:
+            async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+                response = await client.get(self.endpoint, headers=headers, params=params)
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            raise SearchProviderTransientError(f"brave network failure: {exc}") from exc
+        _provider_http_error(self.name, response)
         payload = response.json()
         return [
             item.get("url", "")
@@ -245,8 +299,17 @@ async def discover_and_sync(
 
     try:
         urls = await client.search_urls(discovery_query, count=20)
-    except Exception:
+    except SearchProviderError as exc:
         report.failures += 1
+        report.retryable = exc.retryable
+        report.error_kind = type(exc).__name__
+        report.reason = str(exc)
+        urls = []
+    except Exception as exc:
+        report.failures += 1
+        report.retryable = True
+        report.error_kind = type(exc).__name__
+        report.reason = str(exc)
         urls = []
 
     sources = canonical_sources(urls)[:max_boards]
