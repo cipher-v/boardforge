@@ -44,7 +44,7 @@ class OpenAIEmbeddingProvider:
         self.key = os.getenv("OPENAI_API_KEY", "")
         self.base = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
         self.provider_model = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
-        self.dimensions = int(os.getenv("BOARDFORGE_EMBEDDING_DIMENSIONS", "1536"))
+        self.dimensions = int(os.getenv("BOARDFORGE_EMBEDDING_DIMENSIONS", "768"))
         self.model = f"openai:{self.provider_model}:{self.dimensions}"
         self.enabled = bool(self.key)
 
@@ -64,7 +64,11 @@ class OpenAIEmbeddingProvider:
                     "Authorization": f"Bearer {self.key}",
                     "Content-Type": "application/json",
                 },
-                json={"model": self.provider_model, "input": texts},
+                json={
+                    "model": self.provider_model,
+                    "input": texts,
+                    "dimensions": self.dimensions,
+                },
             )
         response.raise_for_status()
         rows = sorted(response.json()["data"], key=lambda item: item["index"])
