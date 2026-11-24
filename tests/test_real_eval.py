@@ -77,7 +77,7 @@ def test_real_eval_runs_against_frozen_corpus(tmp_path):
             "name": "ml",
             "family": "ai_ml",
             "query": "machine learning engineer India",
-            "relevant_ids": [ml.stable_id],
+            "relevance_grades": {ml.stable_id: 2},
             "forbidden_ids": [sales.stable_id],
         }],
     }
@@ -97,7 +97,10 @@ def test_real_eval_runs_against_frozen_corpus(tmp_path):
     assert report["corpus_snapshot"]["jobs"] == 2
     assert report["cases"] == 1
     assert report["macro"]["precision_among_returned"] == 1.0
+    assert report["macro"]["direct_precision_among_returned"] == 1.0
+    assert report["macro"]["graded_ndcg_at_k"] == 1.0
     assert report["macro"]["top1_accuracy"] == 1.0
+    assert report["macro"]["top1_direct_accuracy"] == 1.0
 
 
 def test_real_eval_rejects_labels_for_missing_jobs(tmp_path):
@@ -115,7 +118,7 @@ def test_real_eval_rejects_labels_for_missing_jobs(tmp_path):
                 "name": "bad",
                 "family": "ai_ml",
                 "query": "ML",
-                "relevant_ids": ["greenhouse:missing:123"],
+                "relevance_grades": {"greenhouse:missing:123": 2},
                 "forbidden_ids": [],
             }],
         }),
@@ -123,6 +126,36 @@ def test_real_eval_rejects_labels_for_missing_jobs(tmp_path):
     )
 
     with pytest.raises(ValueError, match="missing from the frozen corpus"):
+        asyncio.run(run_real_eval(
+            corpus_path,
+            dataset_path,
+            client=EmbeddingClient(_FakeProvider()),
+        ))
+
+
+def test_real_eval_rejects_invalid_relevance_grade(tmp_path):
+    ml = _job("ml", "Machine Learning Engineer", "Acme", "India")
+    corpus_path = tmp_path / "corpus.json"
+    dataset_path = tmp_path / "dataset.json"
+    corpus_path.write_text(
+        json.dumps({"jobs": [ml.model_dump(mode="json")]}),
+        encoding="utf-8",
+    )
+    dataset_path.write_text(
+        json.dumps({
+            "corpus": {"expected_jobs": 1},
+            "cases": [{
+                "name": "bad-grade",
+                "family": "ai_ml",
+                "query": "ML",
+                "relevance_grades": {ml.stable_id: 3},
+                "forbidden_ids": [],
+            }],
+        }),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="must be 1 or 2"):
         asyncio.run(run_real_eval(
             corpus_path,
             dataset_path,
