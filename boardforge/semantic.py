@@ -92,5 +92,12 @@ async def hybrid_rank_jobs(
             match.reasons.append("semantic similarity supports the match")
         rescored.append(match)
 
-    rescored.sort(key=lambda m:(bool(m.hard_violations), -m.score, m.job.title.lower()))
+    rescored.sort(
+        key=lambda m: (
+            bool(m.hard_violations),
+            m.status == "needs_verification",
+            -m.score,
+            m.job.title.lower(),
+        )
+    )
     return rescored[:top_k]
