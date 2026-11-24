@@ -18,7 +18,7 @@ from boardforge.semantic import (
 
 
 DEFAULT_REAL_EVAL_PATH = (
-    Path(__file__).resolve().parent / "data" / "real_india_eval_v1.json"
+    Path(__file__).resolve().parent / "data" / "real_india_eval_v1_1.json"
 )
 
 
@@ -80,17 +80,40 @@ class _SnapshotEmbeddingCache:
         self._vectors[(stable_id, model, content_hash)] = vector
 
 
+def _graded_ndcg_at_k(
+    predicted: list[str],
+    relevance_grades: dict[str, int],
+    k: int,
+) -> float:
+    import math
+
+    gains = [
+        (2 ** relevance_grades.get(stable_id, 0)) - 1
+        for stable_id in predicted[:k]
+    ]
+    dcg = sum(gain / math.log2(index + 2) for index, gain in enumerate(gains))
+    ideal = sorted(
+        ((2 ** grade) - 1 for grade in relevance_grades.values()),
+        reverse=True,
+    )[:k]
+    idcg = sum(gain / math.log2(index + 2) for index, gain in enumerate(ideal))
+    return 0.0 if idcg == 0 else dcg / idcg
+
+
 def _aggregate(rows: list[dict[str, Any]]) -> dict[str, float]:
     if not rows:
         return {}
     metrics = [
         "precision_at_k",
         "precision_among_returned",
+        "direct_precision_among_returned",
         "recall_at_k",
         "ndcg_at_k",
+        "graded_ndcg_at_k",
         "forbidden_rate",
         "hard_constraint_violation_rate",
         "recommended_irrelevant_rate",
+        "recommended_adjacent_rate",
         "needs_verification_rate",
     ]
     out = {
@@ -99,6 +122,9 @@ def _aggregate(rows: list[dict[str, Any]]) -> dict[str, float]:
     }
     out["top1_accuracy"] = (
         sum(bool(row["top1_relevant"]) for row in rows) / len(rows)
+    )
+    out["top1_direct_accuracy"] = (
+        sum(bool(row["top1_direct"]) for row in rows) / len(rows)
     )
     out["empty_rate"] = sum(bool(row["empty"]) for row in rows) / len(rows)
     return {key: round(value, 4) for key, value in out.items()}
@@ -126,13 +152,30 @@ def _validate_dataset(
         )
 
     missing: list[str] = []
+    invalid_grades: list[str] = []
+    overlaps: list[str] = []
     for case in dataset.get("cases", []):
-        for stable_id in [
-            *case.get("relevant_ids", []),
-            *case.get("forbidden_ids", []),
-        ]:
+        grades = case.get("relevance_grades", {})
+        for stable_id, grade in grades.items():
+            if grade not in {1, 2}:
+                invalid_grades.append(f"{case['name']}:{stable_id}={grade}")
+        positive_ids = set(grades) or set(case.get("relevant_ids", []))
+        forbidden_ids = set(case.get("forbidden_ids", []))
+        for stable_id in [*positive_ids, *forbidden_ids]:
             if stable_id not in stable_ids:
                 missing.append(f"{case['name']}:{stable_id}")
+        for stable_id in positive_ids & forbidden_ids:
+            overlaps.append(f"{case['name']}:{stable_id}")
+    if invalid_grades:
+        sample = ", ".join(invalid_grades[:5])
+        raise ValueError(
+            f"real eval relevance grades must be 1 or 2: {sample}"
+        )
+    if overlaps:
+        sample = ", ".join(overlaps[:5])
+        raise ValueError(
+            f"real eval job cannot be both relevant and forbidden: {sample}"
+        )
     if missing:
         sample = ", ".join(missing[:5])
         raise ValueError(
@@ -201,7 +244,23 @@ async def run_real_eval(
         )
 
         predicted = [match.job.stable_id for match in matches]
-        relevant = set(case.get("relevant_ids", []))
+        relevance_grades = {
+            stable_id: int(grade)
+            for stable_id, grade in case.get("relevance_grades", {}).items()
+        }
+        if not relevance_grades:
+            relevance_grades = {
+                stable_id: 2 for stable_id in case.get("relevant_ids", [])
+            }
+        relevant = set(relevance_grades)
+        direct = {
+            stable_id for stable_id, grade in relevance_grades.items()
+            if grade == 2
+        }
+        adjacent = {
+            stable_id for stable_id, grade in relevance_grades.items()
+            if grade == 1
+        }
         forbidden = set(case.get("forbidden_ids", []))
         forbidden_hits = [stable_id for stable_id in predicted if stable_id in forbidden]
         hard_hits = [
@@ -215,6 +274,11 @@ async def run_real_eval(
             for match in recommended
             if match.job.stable_id not in relevant
         ]
+        recommended_adjacent = [
+            match.job.stable_id
+            for match in recommended
+            if match.job.stable_id in adjacent
+        ]
 
         rows.append({
             "name": case["name"],
@@ -226,8 +290,14 @@ async def run_real_eval(
             "precision_among_returned": precision_among_returned(
                 predicted, relevant, top_k
             ),
+            "direct_precision_among_returned": precision_among_returned(
+                predicted, direct, top_k
+            ),
             "recall_at_k": recall_at_k(predicted, relevant, top_k),
             "ndcg_at_k": ndcg_at_k(predicted, relevant, top_k),
+            "graded_ndcg_at_k": _graded_ndcg_at_k(
+                predicted, relevance_grades, top_k
+            ),
             "forbidden_rate": (
                 len(forbidden_hits) / len(predicted) if predicted else 0.0
             ),
@@ -241,12 +311,18 @@ async def run_real_eval(
                 if recommended else 0.0
             ),
             "recommended_irrelevant": recommended_irrelevant,
+            "recommended_adjacent_rate": (
+                len(recommended_adjacent) / len(recommended)
+                if recommended else 0.0
+            ),
+            "recommended_adjacent": recommended_adjacent,
             "needs_verification_rate": (
                 sum(match.status == "needs_verification" for match in matches)
                 / len(matches)
                 if matches else 0.0
             ),
             "top1_relevant": bool(predicted and predicted[0] in relevant),
+            "top1_direct": bool(predicted and predicted[0] in direct),
             "empty": not predicted,
         })
 
