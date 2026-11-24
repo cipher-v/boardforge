@@ -444,6 +444,7 @@ async def warm_job_embeddings(
     *,
     batch_size: int = 64,
     max_jobs: int = 10_000,
+    countries: list[str] | None = None,
 ) -> dict:
     if not client.enabled:
         raise RuntimeError(
@@ -455,6 +456,7 @@ async def warm_job_embeddings(
         jobs = store.embedding_candidates(
             client.model,
             limit=min(batch_size, max_jobs - processed),
+            countries=countries,
         )
         if not jobs:
             break
@@ -480,4 +482,5 @@ async def warm_job_embeddings(
         "processed": processed,
         "model": client.model,
         "dimensions": client.dimensions,
+        "countries": countries or [],
     }
