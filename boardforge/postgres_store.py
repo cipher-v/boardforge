@@ -233,6 +233,81 @@ class PostgresStore:
             ).fetchall()
         return self._jobs(rows)
 
+    @staticmethod
+    def _candidate_filter_clause(
+        preferences: Preferences | None,
+        *,
+        alias: str = "j",
+    ) -> tuple[str, list]:
+        if preferences is None:
+            return "", []
+
+        clauses: list[str] = []
+        params: list = []
+
+        if preferences.countries:
+            clauses.append(
+                f"lower(COALESCE({alias}.payload->>'country','')) = ANY(%s)"
+            )
+            params.append([country.casefold() for country in preferences.countries])
+
+        if preferences.locations:
+            location_clause = (
+                f"EXISTS (SELECT 1 FROM unnest(%s::text[]) AS wanted(location) "
+                f"WHERE lower(COALESCE({alias}.payload->>'location','')) "
+                f"LIKE '%%' || lower(wanted.location) || '%%')"
+            )
+            params.append(preferences.locations)
+            if preferences.remote_ok:
+                location_clause = (
+                    f"({location_clause} OR "
+                    f"COALESCE({alias}.payload->>'remote_policy','unknown')='remote')"
+                )
+            clauses.append(location_clause)
+
+        if preferences.max_required_experience_years is not None:
+            clauses.append(
+                f"(({alias}.payload->>'min_experience_years') IS NULL OR "
+                f"({alias}.payload->>'min_experience_years')::double precision <= %s)"
+            )
+            params.append(preferences.max_required_experience_years)
+
+        if not preferences.remote_ok:
+            clauses.append(
+                f"COALESCE({alias}.payload->>'remote_policy','unknown') <> 'remote'"
+            )
+
+        if not preferences.onsite_ok:
+            clauses.append(
+                f"COALESCE({alias}.payload->>'remote_policy','unknown') "
+                f"NOT IN ('onsite','unknown')"
+            )
+
+        if preferences.paid_only:
+            clauses.append(
+                f"lower({alias}.search_document) NOT LIKE ALL(%s)"
+            )
+            params.append(["%unpaid%", "%no stipend%", "%without stipend%"])
+
+        if preferences.min_salary_lpa is not None:
+            # Unknown/non-INR salaries remain eligible for verification, matching
+            # the Python hard-constraint semantics. Only known comparable INR
+            # salaries below the requested floor are removed here.
+            clauses.append(
+                f"((({alias}.payload->>'salary_min') IS NULL) OR "
+                f"upper(COALESCE({alias}.payload->>'salary_currency','')) <> 'INR' OR "
+                f"COALESCE({alias}.payload->>'salary_period','unknown') NOT IN ('year','month') OR "
+                f"(CASE COALESCE({alias}.payload->>'salary_period','unknown') "
+                f"WHEN 'year' THEN ({alias}.payload->>'salary_min')::double precision / 100000.0 "
+                f"WHEN 'month' THEN ({alias}.payload->>'salary_min')::double precision * 12.0 / 100000.0 "
+                f"ELSE NULL END) >= %s)"
+            )
+            params.append(preferences.min_salary_lpa)
+
+        if not clauses:
+            return "", []
+        return " AND " + " AND ".join(f"({clause})" for clause in clauses), params
+
     def candidate_jobs(
         self,
         query: str,
@@ -240,6 +315,7 @@ class PostgresStore:
         limit: int = 250,
         query_vector: list[float] | None = None,
         embedding_model: str = "",
+        preferences: Preferences | None = None,
     ) -> list[Job]:
         limit = max(1, min(limit, 2000))
         if query_vector is not None and len(query_vector) != POSTGRES_EMBEDDING_DIMENSIONS:
@@ -247,37 +323,57 @@ class PostgresStore:
                 f"PostgreSQL vector index expects {POSTGRES_EMBEDDING_DIMENSIONS} dimensions; "
                 f"got {len(query_vector)}"
             )
+
         normalized = " ".join(query.split())
+        filters, filter_params = self._candidate_filter_clause(preferences)
+
         with self.connect() as connection:
             if not normalized and query_vector is None:
+                sql = (
+                    "SELECT j.payload,j.first_seen,j.last_seen FROM jobs j "
+                    "WHERE j.status='active'"
+                    + filters
+                    + " ORDER BY j.last_seen DESC LIMIT %s"
+                )
                 rows = connection.execute(
-                    """SELECT payload,first_seen,last_seen FROM jobs
-                       WHERE status='active' ORDER BY last_seen DESC LIMIT %s""",
-                    (limit,),
+                    sql, (*filter_params, limit)
                 ).fetchall()
             elif query_vector is None:
+                sql = (
+                    "SELECT j.payload,j.first_seen,j.last_seen,"
+                    " ts_rank_cd(j.search_vector,websearch_to_tsquery('english',%s)) AS lexical"
+                    " FROM jobs j WHERE j.status='active'"
+                    + filters
+                    + " ORDER BY lexical DESC,j.last_seen DESC LIMIT %s"
+                )
                 rows = connection.execute(
-                    """SELECT payload,first_seen,last_seen,
-                              ts_rank_cd(search_vector,websearch_to_tsquery('english',%s)) AS lexical
-                       FROM jobs WHERE status='active'
-                       ORDER BY lexical DESC,last_seen DESC LIMIT %s""",
-                    (normalized, limit),
+                    sql, (normalized, *filter_params, limit)
                 ).fetchall()
             else:
                 vector_param = Vector(query_vector)
+                sql = (
+                    "SELECT j.payload,j.first_seen,j.last_seen,"
+                    " ts_rank_cd(j.search_vector,websearch_to_tsquery('english',%s)) AS lexical,"
+                    " CASE WHEN e.vector IS NULL THEN 0 ELSE 1-(e.vector <=> %s) END AS semantic"
+                    " FROM jobs j LEFT JOIN job_embeddings e"
+                    " ON e.stable_id=j.stable_id AND e.model=%s"
+                    " WHERE j.status='active'"
+                    + filters
+                    + " ORDER BY (0.65*ts_rank_cd(j.search_vector,websearch_to_tsquery('english',%s))"
+                    " +0.35*CASE WHEN e.vector IS NULL THEN 0 ELSE 1-(e.vector <=> %s) END) DESC,"
+                    " j.last_seen DESC LIMIT %s"
+                )
                 rows = connection.execute(
-                    """SELECT j.payload,j.first_seen,j.last_seen,
-                              ts_rank_cd(j.search_vector,websearch_to_tsquery('english',%s)) AS lexical,
-                              CASE WHEN e.vector IS NULL THEN 0
-                                   ELSE 1-(e.vector <=> %s) END AS semantic
-                       FROM jobs j LEFT JOIN job_embeddings e
-                         ON e.stable_id=j.stable_id AND e.model=%s
-                       WHERE j.status='active'
-                       ORDER BY (0.65*ts_rank_cd(j.search_vector,websearch_to_tsquery('english',%s))
-                                 +0.35*CASE WHEN e.vector IS NULL THEN 0
-                                            ELSE 1-(e.vector <=> %s) END) DESC,
-                                j.last_seen DESC LIMIT %s""",
-                    (normalized, vector_param, embedding_model, normalized, vector_param, limit),
+                    sql,
+                    (
+                        normalized,
+                        vector_param,
+                        embedding_model,
+                        *filter_params,
+                        normalized,
+                        vector_param,
+                        limit,
+                    ),
                 ).fetchall()
         return self._jobs(rows)
 
