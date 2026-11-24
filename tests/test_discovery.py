@@ -1,3 +1,5 @@
+import asyncio
+import pytest
 from boardforge.connectors.detect import detect_source
 from boardforge.discovery import build_discovery_query, canonical_sources
 from boardforge.models import CandidateProfile, Preferences
@@ -47,3 +49,88 @@ def test_canonical_sources_deduplicate_same_board():
         ("greenhouse", "acme"),
         ("lever", "other"),
     ]
+
+
+class _FakeResponse:
+    def __init__(self, status_code=200, payload=None):
+        self.status_code = status_code
+        self._payload = payload or {"results": []}
+
+    def json(self):
+        return self._payload
+
+
+class _FakeAsyncClient:
+    def __init__(self, capture, response, **kwargs):
+        self.capture = capture
+        self.response = response
+        self.capture["client_kwargs"] = kwargs
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def post(self, url, **kwargs):
+        self.capture["method"] = "POST"
+        self.capture["url"] = url
+        self.capture["request"] = kwargs
+        return self.response
+
+
+def test_tavily_http_contract(monkeypatch):
+    from boardforge.discovery.web import TAVILY_DOMAINS, TavilyDiscoveryClient
+
+    capture = {}
+    response = _FakeResponse(payload={
+        "results": [
+            {"url": "https://job-boards.greenhouse.io/acme/jobs/123"},
+            {"url": "https://jobs.ashbyhq.com/demo/abc"},
+        ]
+    })
+    monkeypatch.setattr(
+        "boardforge.discovery.web.httpx.AsyncClient",
+        lambda **kwargs: _FakeAsyncClient(capture, response, **kwargs),
+    )
+
+    urls = asyncio.run(
+        TavilyDiscoveryClient("test-key").search_urls("backend engineer India", count=7)
+    )
+
+    assert capture["method"] == "POST"
+    assert capture["url"] == "https://api.tavily.com/search"
+    assert capture["request"]["headers"]["Authorization"] == "Bearer test-key"
+    body = capture["request"]["json"]
+    assert body["search_depth"] == "basic"
+    assert body["max_results"] == 7
+    assert body["include_domains"] == list(TAVILY_DOMAINS)
+    assert urls == [
+        "https://job-boards.greenhouse.io/acme/jobs/123",
+        "https://jobs.ashbyhq.com/demo/abc",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("status_code", "expected"),
+    [
+        (401, "SearchProviderAuthError"),
+        (403, "SearchProviderAuthError"),
+        (429, "SearchProviderRateLimitError"),
+        (500, "SearchProviderTransientError"),
+        (400, "SearchProviderRequestError"),
+    ],
+)
+def test_tavily_http_error_classification(monkeypatch, status_code, expected):
+    from boardforge.discovery.web import TavilyDiscoveryClient
+
+    capture = {}
+    response = _FakeResponse(status_code=status_code)
+    monkeypatch.setattr(
+        "boardforge.discovery.web.httpx.AsyncClient",
+        lambda **kwargs: _FakeAsyncClient(capture, response, **kwargs),
+    )
+
+    with pytest.raises(Exception) as exc:
+        asyncio.run(TavilyDiscoveryClient("test-key").search_urls("backend", count=5))
+    assert type(exc.value).__name__ == expected
