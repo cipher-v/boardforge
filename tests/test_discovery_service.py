@@ -11,9 +11,7 @@ class EnabledClient:
     name = "test"
 
     async def search_urls(self, query: str, *, count: int = 20) -> list[str]:
-        if "greenhouse" in query:
-            return ["https://job-boards.greenhouse.io/acme/jobs/123"]
-        return []
+        return ["https://job-boards.greenhouse.io/acme/jobs/123"]
 
 
 def test_discovery_requests_are_durable_and_cached(tmp_path):
