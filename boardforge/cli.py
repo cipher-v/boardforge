@@ -82,6 +82,12 @@ def main() -> None:
     p_embed_index.add_argument("--batch-size", type=int, default=64)
     p_embed_index.add_argument("--max-jobs", type=int, default=10000)
     p_embed_index.add_argument(
+        "--country",
+        action="append",
+        default=[],
+        help="Only backfill active jobs in this country; repeat for multiple countries.",
+    )
+    p_embed_index.add_argument(
         "--allow-sqlite",
         action="store_true",
         help="Allow embedding backfill against the SQLite fallback store.",
@@ -151,7 +157,9 @@ def main() -> None:
             )
         out = asyncio.run(warm_job_embeddings(
             store, EmbeddingClient(),
-            batch_size=args.batch_size, max_jobs=args.max_jobs,
+            batch_size=args.batch_size,
+            max_jobs=args.max_jobs,
+            countries=args.country or None,
         ))
         out["store"] = type(store).__name__
         _print_json(out)
