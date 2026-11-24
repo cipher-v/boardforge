@@ -132,6 +132,8 @@ def test_ai_ml_role_evidence_accepts_specialized_engineering_titles_not_generic_
     assert role_evidence(job("principal", "Principal Engineer (L5)"), "AI/ML") is None
     assert role_evidence(job("manager", "Senior Engineering Manager (L5)"), "AI/ML") is None
     assert role_evidence(job("architect", "Principal Enterprise Architect"), "AI/ML") is None
+    assert role_evidence(job("hardware", "AI Hardware Engineer"), "AI/ML") is None
+    assert role_evidence(job("embedded", "Embedded AI Engineer"), "AI/ML") is None
 
 
 def test_llm_query_excludes_generic_engineering_leadership_roles():
