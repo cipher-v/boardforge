@@ -86,8 +86,8 @@ def test_hybrid_keeps_verified_matches_ahead_of_needs_verification(tmp_path: Pat
         client=client,
         store=store,
     ))
-    assert matches[0].job.external_id == "known"
-    assert matches[1].status == "needs_verification"
+    assert {match.job.external_id for match in matches} == {"known", "unknown"}
+    assert all(match.status == "needs_verification" for match in matches)
 
 
 def test_semantic_query_text_removes_hard_filter_tokens():
@@ -125,7 +125,7 @@ def test_semantic_only_match_is_not_marked_recommended(tmp_path: Path):
     by_id = {match.job.external_id: match for match in matches}
     assert by_id["backend"].status == "recommended"
     assert by_id["sales"].status == "needs_verification"
-    assert "semantic-only relevance; no concrete query or role evidence" in by_id["sales"].risks
+    assert "query-specific relevance not verified" in by_id["sales"].risks
 
 
 
@@ -155,7 +155,7 @@ def test_generic_country_overlap_does_not_create_confident_relevance():
 
     assert matches[0].status == "needs_verification"
     assert (
-        "semantic-only relevance; no concrete query or role evidence"
+        "query-specific relevance not verified"
         in matches[0].risks
     )
 

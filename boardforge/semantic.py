@@ -12,7 +12,7 @@ from typing import Protocol
 import httpx
 
 from boardforge.database import StoreProtocol
-from boardforge.matching import job_text, query_text, query_topic_terms, rank_jobs
+from boardforge.matching import job_text, rank_jobs
 from boardforge.models import Job, Match, Preferences
 from boardforge.observability import observe_embedding_request
 
@@ -322,6 +322,7 @@ async def hybrid_rank_jobs(
     client: EmbeddingClient,
     store: StoreProtocol | None = None,
     query_vector: list[float] | None = None,
+    query_embedding_attempted: bool = False,
 ) -> list[Match]:
     baseline = rank_jobs(
         jobs, prefs, query=query, top_k=len(jobs), rejected_ids=rejected_ids
@@ -329,13 +330,19 @@ async def hybrid_rank_jobs(
     if not baseline or not client.enabled:
         return baseline[:top_k]
 
-    qtext = semantic_query_text(prefs, query)
-    try:
-        qv = query_vector or (
-            await client.embed([qtext], task_type=RETRIEVAL_QUERY)
-        )[0]
-    except Exception:
+    if query_vector is not None:
+        qv = query_vector
+    elif query_embedding_attempted:
+        # retrieve_and_rank_jobs already tried this exact query. A provider
+        # failure must degrade once to deterministic ranking, not trigger a
+        # duplicate paid request from the hybrid rescoring layer.
         return baseline[:top_k]
+    else:
+        qtext = semantic_query_text(prefs, query)
+        try:
+            qv = (await client.embed([qtext], task_type=RETRIEVAL_QUERY))[0]
+        except Exception:
+            return baseline[:top_k]
 
     documents = [job_text(match.job)[:6000] for match in baseline]
     vectors: list[list[float] | None] = [None] * len(documents)
@@ -386,30 +393,6 @@ async def hybrid_rank_jobs(
 
         if semantic > 0.45:
             match.reasons.append(f"semantic similarity score {semantic:.3f}")
-
-        has_role_evidence = any(
-            item.kind == "role" for item in match.evidence
-        )
-        has_query_topic_evidence = any(
-            item.kind in {"preferred_term", "query_topic"} for item in match.evidence
-        )
-        specific_topic_terms = query_topic_terms(prefs, query) if query.strip() else set()
-        confidence_gap = (
-            bool(specific_topic_terms) and not has_query_topic_evidence
-        ) or (
-            not specific_topic_terms
-            and not has_role_evidence
-            and not has_query_topic_evidence
-        )
-        if query.strip() and confidence_gap:
-            match.status = "needs_verification"
-            risk = (
-                "query-specific relevance not verified"
-                if specific_topic_terms and has_role_evidence
-                else "semantic-only relevance; no concrete query or role evidence"
-            )
-            if risk not in match.risks:
-                match.risks.append(risk)
 
         rescored.append(match)
 
@@ -464,6 +447,7 @@ async def retrieve_and_rank_jobs(
         client=client,
         store=store,
         query_vector=query_vector,
+        query_embedding_attempted=client.enabled and bool(retrieval_query),
     )
     return matches, {
         "store": type(store).__name__,

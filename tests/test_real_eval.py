@@ -97,7 +97,11 @@ def test_real_eval_runs_against_frozen_corpus(tmp_path):
     assert report["corpus_snapshot"]["jobs"] == 2
     assert report["cases"] == 1
     assert report["macro"]["precision_among_returned"] == 1.0
-    assert report["macro"]["direct_precision_among_returned"] == 1.0
+    assert report["macro"]["recommended_precision"] == 1.0
+    assert report["macro"]["recommended_recall"] == 1.0
+    assert report["macro"]["recommendation_coverage"] == 1.0
+    assert report["macro"]["abstention_rate"] == 0.0
+    assert report["macro"]["queries_with_no_confident_recommendations"] == 0
     assert report["macro"]["graded_ndcg_at_k"] == 1.0
     assert report["macro"]["top1_accuracy"] == 1.0
     assert report["macro"]["top1_direct_accuracy"] == 1.0
@@ -131,6 +135,52 @@ def test_real_eval_rejects_labels_for_missing_jobs(tmp_path):
             dataset_path,
             client=EmbeddingClient(_FakeProvider()),
         ))
+
+
+def test_real_eval_reports_relevant_but_unverified_abstention(tmp_path):
+    candidate = Job(
+        source_kind="greenhouse",
+        source_key="example",
+        external_id="uncertain",
+        title="Software Engineer",
+        company="Example",
+        country="India",
+        description="General platform engineering with limited security exposure.",
+    )
+    corpus_path = tmp_path / "corpus.json"
+    dataset_path = tmp_path / "dataset.json"
+    corpus_path.write_text(
+        json.dumps({"country": "India", "jobs": [candidate.model_dump(mode="json")]}),
+        encoding="utf-8",
+    )
+    dataset_path.write_text(
+        json.dumps({
+            "version": "test",
+            "corpus": {"expected_jobs": 1},
+            "cases": [{
+                "name": "uncertain",
+                "family": "security",
+                "query": "security incident response automation India",
+                "relevance_grades": {candidate.stable_id: 1},
+                "forbidden_ids": [],
+            }],
+        }),
+        encoding="utf-8",
+    )
+
+    report = asyncio.run(run_real_eval(
+        corpus_path,
+        dataset_path,
+        top_k=1,
+        client=EmbeddingClient(_FakeProvider()),
+    ))
+
+    assert report["macro"]["recommended_precision"] == 0.0
+    assert report["macro"]["recommended_recall"] == 0.0
+    assert report["macro"]["recommendation_coverage"] == 0.0
+    assert report["macro"]["abstention_rate"] == 1.0
+    assert report["macro"]["queries_with_no_confident_recommendations"] == 1
+    assert report["results"][0]["predicted"] == [candidate.stable_id]
 
 
 def test_real_eval_rejects_invalid_relevance_grade(tmp_path):

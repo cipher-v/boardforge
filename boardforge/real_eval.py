@@ -115,6 +115,10 @@ def _aggregate(rows: list[dict[str, Any]]) -> dict[str, float]:
         "recommended_irrelevant_rate",
         "recommended_adjacent_rate",
         "needs_verification_rate",
+        "recommended_precision",
+        "recommended_recall",
+        "recommendation_coverage",
+        "abstention_rate",
     ]
     out = {
         metric: sum(float(row[metric]) for row in rows) / len(rows)
@@ -127,7 +131,17 @@ def _aggregate(rows: list[dict[str, Any]]) -> dict[str, float]:
         sum(bool(row["top1_direct"]) for row in rows) / len(rows)
     )
     out["empty_rate"] = sum(bool(row["empty"]) for row in rows) / len(rows)
-    return {key: round(value, 4) for key, value in out.items()}
+    out["queries_with_no_confident_recommendations"] = sum(
+        bool(row["no_confident_recommendations"]) for row in rows
+    )
+    out["queries_with_no_confident_recommendations_rate"] = (
+        out["queries_with_no_confident_recommendations"] / len(rows)
+    )
+    rounded = {key: round(value, 4) for key, value in out.items()}
+    rounded["queries_with_no_confident_recommendations"] = int(
+        out["queries_with_no_confident_recommendations"]
+    )
+    return rounded
 
 
 def _family_aggregate(rows: list[dict[str, Any]]) -> dict[str, dict[str, float]]:
@@ -269,6 +283,7 @@ async def run_real_eval(
             if hard_violations(match.job, preferences)
         ]
         recommended = [match for match in matches if match.status == "recommended"]
+        recommended_ids = [match.job.stable_id for match in recommended]
         recommended_irrelevant = [
             match.job.stable_id
             for match in recommended
@@ -316,6 +331,22 @@ async def run_real_eval(
                 if recommended else 0.0
             ),
             "recommended_adjacent": recommended_adjacent,
+            "recommended": recommended_ids,
+            "recommended_precision": precision_among_returned(
+                recommended_ids, relevant, len(recommended_ids)
+            ),
+            "recommended_recall": recall_at_k(
+                recommended_ids, relevant, len(recommended_ids)
+            ),
+            "recommendation_coverage": (
+                len(recommended_ids) / len(matches) if matches else 0.0
+            ),
+            "abstention_rate": (
+                sum(match.status == "needs_verification" for match in matches)
+                / len(matches)
+                if matches else 0.0
+            ),
+            "no_confident_recommendations": not recommended_ids,
             "needs_verification_rate": (
                 sum(match.status == "needs_verification" for match in matches)
                 / len(matches)

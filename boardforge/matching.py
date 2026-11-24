@@ -4,32 +4,17 @@ import math
 import re
 from collections import Counter
 
+from boardforge.confidence import (
+    assess_query_relevance,
+    enforce_recommendation_confidence,
+    parse_query_intent,
+    query_evidence_items,
+)
 from boardforge.enrich import salary_min_lpa
 from boardforge.models import Job, Match, MatchEvidence, Preferences
 
 
 WORD_RE = re.compile(r"[a-zA-Z0-9+#.]{2,}")
-QUERY_GENERIC_TOKENS = {
-    "a", "an", "and", "or", "the", "to", "for", "of", "in", "on", "with",
-    "job", "jobs", "role", "roles", "engineer", "engineering", "developer",
-    "software", "senior", "staff", "principal", "lead", "manager",
-    "india", "remote", "onsite", "hybrid", "only", "avoid", "exclude",
-    "requiring", "require", "required", "more", "than", "over", "above",
-    "greater", "at", "most", "max", "maximum", "years", "year", "yrs",
-    "experience", "systems", "system",
-}
-ROLE_QUERY_TOKENS: dict[str, set[str]] = {
-    "AI/ML": {
-        "ai", "ml", "machine", "learning", "llm", "genai", "generative",
-        "artificial", "intelligence",
-    },
-    "Computer Vision": {"computer", "vision", "perception", "image", "processing"},
-    "Backend": {"backend", "back", "end"},
-    "Software Engineering": {"software", "engineering", "developer"},
-    "Data Engineering": {"data", "engineering", "etl"},
-    "Data Science": {"data", "science", "scientist"},
-    "QA": {"qa", "test", "testing", "quality", "assurance", "sdet"},
-}
 ROLE_PATTERNS: dict[str, tuple[str, ...]] = {
     "AI/ML": (
         r"\bai engineer\b", r"\bml engineer\b", r"\bmachine learning\b",
@@ -156,31 +141,7 @@ def _description_role_evidence(job: Job, role: str) -> MatchEvidence | None:
 
 
 def query_topic_terms(preferences: Preferences, query: str) -> set[str]:
-    cleaned = query.casefold()
-    for term in [*preferences.countries, *preferences.locations]:
-        if term:
-            cleaned = re.sub(
-                rf"(?<!\w){re.escape(term.casefold())}(?!\w)",
-                " ",
-                cleaned,
-            )
-    cleaned = re.sub(
-        r"\b\d+(?:\.\d+)?\s*(?:lpa|lakhs?|lakh|years?|yrs?)\b",
-        " ",
-        cleaned,
-    )
-    role_tokens = set().union(
-        *(ROLE_QUERY_TOKENS.get(role, set()) for role in preferences.roles)
-    ) if preferences.roles else set()
-    return {
-        token
-        for token in tokens(cleaned)
-        if (
-            token not in QUERY_GENERIC_TOKENS
-            and token not in role_tokens
-            and not token.isdigit()
-        )
-    }
+    return set(parse_query_intent(preferences, query).specific_terms)
 
 
 def query_topic_evidence(
@@ -194,23 +155,18 @@ def query_topic_evidence(
     ignored so they cannot by themselves make a semantic neighbor look
     confidently relevant.
     """
-    terms = query_topic_terms(preferences, query)
-    if not terms:
+    assessment = assess_query_relevance(job, preferences, query)
+    terms = assessment.intent.specific_terms
+    if not terms or not assessment.confident_topic:
         return None
-
-    document_terms = set(tokens(job_text(job)))
-    matched = sorted(terms & document_terms)
-    required = 1 if len(terms) == 1 else 2 if len(terms) <= 5 else 3
-    if len(matched) < required:
-        return None
-
-    coverage = len(matched) / len(terms)
+    matched = sorted(assessment.coherent_terms)
+    coverage = len(assessment.matched_terms) / len(terms)
     weight = min(0.12, 0.04 + (0.08 * coverage))
     return MatchEvidence(
         kind="query_topic",
         value=", ".join(matched),
         detail=(
-            f"query topic matched {len(matched)}/{len(terms)} meaningful terms: "
+            f"query topic coherently matched {len(matched)}/{len(terms)} meaningful terms: "
             + ", ".join(matched)
         ),
         weight=weight,
@@ -361,12 +317,15 @@ def rank_jobs(
         if violations:
             continue
         reasons, risks, bonus, structured_evidence = evidence(job, preferences)
-        topic_item = query_topic_evidence(job, preferences, query) if query.strip() else None
-        if topic_item:
-            structured_evidence.append(topic_item)
-            reasons.append(topic_item.detail)
-            bonus += topic_item.weight
-        if preferences.roles and not any(item.kind == "role" for item in structured_evidence):
+        if query.strip():
+            assessment = assess_query_relevance(job, preferences, query)
+            intent_items = query_evidence_items(assessment)
+            structured_evidence.extend(intent_items)
+            reasons.extend(item.detail for item in intent_items)
+            bonus += sum(item.weight for item in intent_items)
+        if preferences.roles and not any(
+            item.kind == "role" for item in structured_evidence
+        ):
             continue
         score = lexical_score(job, preferences, query) + bonus
         status = "recommended"
@@ -380,7 +339,7 @@ def rank_jobs(
             score -= 0.08
             status = "needs_verification"
 
-        matches.append(Match(
+        match = Match(
             job=job,
             score=round(score, 4),
             status=status,
@@ -388,7 +347,8 @@ def rank_jobs(
             risks=risks,
             hard_violations=[],
             evidence=structured_evidence,
-        ))
+        )
+        matches.append(enforce_recommendation_confidence(match, preferences, query))
     matches.sort(
         key=lambda match: (
             match.status == "needs_verification",
