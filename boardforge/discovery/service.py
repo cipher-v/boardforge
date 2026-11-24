@@ -4,7 +4,7 @@ import hashlib
 import json
 import os
 
-from boardforge.discovery.web import BraveDiscoveryClient, discover_and_sync
+from boardforge.discovery.web import SearchProvider, create_search_provider, discover_and_sync
 from boardforge.models import CandidateProfile, Preferences
 from boardforge.database import StoreProtocol
 
@@ -34,9 +34,9 @@ def queue_discovery(
     preferences: Preferences,
     *,
     query: str = "",
-    client: BraveDiscoveryClient | None = None,
+    client: SearchProvider | None = None,
 ) -> dict:
-    client = client or BraveDiscoveryClient()
+    client = client or create_search_provider()
     if not client.enabled:
         return {
             "request_id": None,
@@ -62,7 +62,7 @@ async def run_discovery_request(
     preferences: Preferences,
     *,
     query: str = "",
-    client: BraveDiscoveryClient | None = None,
+    client: SearchProvider | None = None,
     claimed: bool = False,
 ) -> None:
     if not claimed and not store.start_discovery(request_id):
@@ -90,7 +90,7 @@ async def run_pending_discoveries(
     store: StoreProtocol,
     *,
     limit: int = 10,
-    client: BraveDiscoveryClient | None = None,
+    client: SearchProvider | None = None,
 ) -> dict:
     requeued = store.requeue_stale_discoveries()
     processed = 0
