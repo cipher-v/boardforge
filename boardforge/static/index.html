@@ -93,6 +93,7 @@ details.advanced{margin-top:24px;border-top:1px solid var(--line);padding-top:14
 
 <script>
 const profileId='local-demo';
+let hasProfile=false;
 const $=id=>document.getElementById(id);
 async function api(path,body){
   const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -106,6 +107,7 @@ const scorePercent=score=>Math.max(0,Math.min(100,Math.round((score||0)*100)));
 
 function renderProfile(profile){
   if(!profile)return;
+  hasProfile=true;
   $('profileCard').classList.add('show');
   $('profileFile').textContent=profile.resume_filename||'resume';
   const roles=(profile.role_signals||[]).map(x=>'<span class="chip role">'+esc(x)+'</span>');
@@ -151,7 +153,7 @@ async function feedback(btn){
 
 async function uploadResume(file){
   if(!file)return;
-  $('resumeStatus').textContent='Reading resume and finding matches…';
+  $('resumeStatus').textContent='Reading resume and searching relevant job sources…';
   $('chooseResume').disabled=true;
   try{
     const path='/resume?profile_id='+encodeURIComponent(profileId)+'&filename='+encodeURIComponent(file.name);
@@ -160,8 +162,11 @@ async function uploadResume(file){
     if(!r.ok)throw new Error(d.detail||'Resume upload failed');
     renderProfile(d.profile);
     render(d.matches||[]);
-    $('resumeStatus').textContent='Resume ready · '+(d.profile.skills||[]).length+' skills detected';
-    $('searchStatus').textContent=(d.matches||[]).length+' recommendations from your resume';
+    const discovery=d.discovery||{};
+    $('resumeStatus').textContent=discovery.enabled
+      ? 'Resume ready · '+discovery.synced_boards+' boards synced · '+discovery.jobs_fetched+' live jobs fetched'
+      : 'Resume ready · '+(d.profile.skills||[]).length+' skills detected';
+    $('searchStatus').textContent=(d.matches||[]).length+' relevant recommendations from your resume';
   }catch(e){$('resumeStatus').textContent=e.message}finally{$('chooseResume').disabled=false}
 }
 $('chooseResume').onclick=()=>$('resumeInput').click();
@@ -174,8 +179,16 @@ drop.addEventListener('drop',e=>uploadResume(e.dataTransfer.files[0]));
 async function search(){
   const b=$('searchBtn');b.disabled=true;$('searchStatus').textContent='Searching…';
   try{
-    const d=await api('/search',{profile_id:profileId,query:$('query').value,top_k:15});
-    render(d.matches);$('searchStatus').textContent=d.matches.length+' eligible matches'+(d.profile_used?' · resume context used':'');
+    let d;
+    if(hasProfile){
+      d=await api('/discover/'+encodeURIComponent(profileId),{profile_id:profileId,query:$('query').value,top_k:15});
+    }else{
+      d=await api('/search',{profile_id:profileId,query:$('query').value,top_k:15});
+    }
+    render(d.matches);
+    const discovery=d.discovery||{};
+    $('searchStatus').textContent=d.matches.length+' relevant matches'
+      +(discovery.enabled?' · '+discovery.synced_boards+' boards synced · '+discovery.jobs_fetched+' live jobs fetched':'');
   }catch(e){$('searchStatus').textContent=e.message}finally{b.disabled=false}
 }
 $('searchBtn').onclick=search;
@@ -200,7 +213,7 @@ async function restoreProfile(){
   try{
     const r=await fetch('/candidate-profile/'+encodeURIComponent(profileId));
     const d=await r.json();
-    if(d.profile){renderProfile(d.profile);const rr=await fetch('/recommendations/'+encodeURIComponent(profileId)+'?top_k=20');const rec=await rr.json();render(rec.matches);$('searchStatus').textContent=rec.matches.length+' recommendations from your resume'}
+    if(d.profile){renderProfile(d.profile);const rr=await fetch('/recommendations/'+encodeURIComponent(profileId)+'?top_k=15');const rec=await rr.json();render(rec.matches);$('searchStatus').textContent=rec.matches.length+' relevant recommendations from your resume'}
   }catch(_){}
 }
 fetch('/health').then(r=>r.json()).then(d=>{const el=$('health');el.classList.add('ok');el.querySelector('span:last-child').textContent='v'+d.version+' · online'}).catch(()=>{$('health').querySelector('span:last-child').textContent='offline'});
