@@ -1,4 +1,4 @@
-from boardforge.matching import hard_violations, query_topic_evidence, rank_jobs, role_evidence
+from boardforge.matching import hard_violations, query_topic_evidence, query_topic_terms, rank_jobs, role_evidence
 from boardforge.models import Job, Preferences
 from boardforge.preferences import deterministic_extract
 
@@ -223,3 +223,22 @@ def test_query_topic_evidence_requires_substantial_specific_overlap():
     )
     assert item is not None
     assert item.kind == "query_topic"
+
+
+
+def test_query_topic_terms_remove_recognized_role_language():
+    prefs = deterministic_extract("machine learning engineer India")
+    assert query_topic_terms(prefs, "machine learning engineer India") == set()
+
+
+def test_query_topic_terms_keep_specific_intent_beyond_role():
+    prefs = deterministic_extract(
+        "machine learning anti-fraud anti-abuse distributed systems India"
+    )
+    terms = query_topic_terms(
+        prefs,
+        "machine learning anti-fraud anti-abuse distributed systems India",
+    )
+    assert {"anti", "fraud", "abuse", "distributed"} <= terms
+    assert "machine" not in terms
+    assert "learning" not in terms
