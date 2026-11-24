@@ -408,6 +408,7 @@ async def retrieve_and_rank_jobs(
         limit=candidate_limit,
         query_vector=query_vector,
         embedding_model=client.model if query_vector is not None else "",
+        preferences=prefs,
     )
     matches = await hybrid_rank_jobs(
         jobs,
@@ -425,6 +426,15 @@ async def retrieve_and_rank_jobs(
         "candidate_limit": candidate_limit,
         "semantic_retrieval": semantic_retrieval,
         "embedding_model": client.model if client.enabled else None,
+        "hard_filters_pushed_down": isinstance(prefs, Preferences) and bool(
+            prefs.countries
+            or prefs.locations
+            or prefs.max_required_experience_years is not None
+            or not prefs.remote_ok
+            or not prefs.onsite_ok
+            or prefs.paid_only
+            or prefs.min_salary_lpa is not None
+        ),
     }
 
 
