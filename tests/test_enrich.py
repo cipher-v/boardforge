@@ -33,3 +33,12 @@ def test_parses_lpa_and_monthly_inr_salary():
 
     unpaid = enrich_job(base(location="Pune, India", description="Unpaid internship. No stipend."))
     assert salary_min_lpa(unpaid) == 0
+
+
+def test_country_inference_handles_explicit_global_countries_conservatively():
+    assert infer_country("Hybrid - Singapore") == "Singapore"
+    assert infer_country("Remote - Argentina") == "Argentina"
+    assert infer_country("Lenexa, Kansas") == "USA"
+    assert infer_country("Remote - Spain") == "Spain"
+    assert infer_country("Remote - Australia; Remote - Japan") == ""
+    assert infer_country("Remote - Brazil; Remote - Colombia") == ""
