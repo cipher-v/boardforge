@@ -325,7 +325,11 @@ async def hybrid_rank_jobs(
         else:
             vectors[index] = cached
 
-    if missing_indexes:
+    # Production search must never fan out to the external embedding provider
+    # for missing documents. Document embeddings are populated explicitly by
+    # embed-index / background maintenance. In-memory evals (store=None) may
+    # embed documents on demand because they do not persist or serve requests.
+    if missing_indexes and store is None:
         try:
             embedded = await client.embed(
                 [documents[index] for index in missing_indexes],
@@ -339,17 +343,13 @@ async def hybrid_rank_jobs(
             )
         for index, vector in zip(missing_indexes, embedded):
             vectors[index] = vector
-            if store:
-                store.save_embedding(
-                    baseline[index].job.stable_id,
-                    client.model,
-                    content_hashes[index],
-                    vector,
-                )
 
     rescored = []
     for match, vector in zip(baseline, vectors):
-        if vector is None:  # pragma: no cover
+        if vector is None:
+            # Keep the deterministic lexical/evidence result while the offline
+            # embedding index catches up. Do not make hidden provider calls.
+            rescored.append(match)
             continue
         semantic = cosine(qv, vector)
         lexical = lexical_score(match.job, prefs, query)
