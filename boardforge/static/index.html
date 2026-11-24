@@ -174,7 +174,7 @@ drop.addEventListener('drop',e=>uploadResume(e.dataTransfer.files[0]));
 async function search(){
   const b=$('searchBtn');b.disabled=true;$('searchStatus').textContent='Searching…';
   try{
-    const d=await api('/search',{profile_id:profileId,query:$('query').value,top_k:10});
+    const d=await api('/search',{profile_id:profileId,query:$('query').value,top_k:15});
     render(d.matches);$('searchStatus').textContent=d.matches.length+' eligible matches'+(d.profile_used?' · resume context used':'');
   }catch(e){$('searchStatus').textContent=e.message}finally{b.disabled=false}
 }
@@ -200,7 +200,7 @@ async function restoreProfile(){
   try{
     const r=await fetch('/candidate-profile/'+encodeURIComponent(profileId));
     const d=await r.json();
-    if(d.profile){renderProfile(d.profile);const rec=await api('/search',{profile_id:profileId,query:'',top_k:10});render(rec.matches);$('searchStatus').textContent=rec.matches.length+' recommendations from your resume'}
+    if(d.profile){renderProfile(d.profile);const rr=await fetch('/recommendations/'+encodeURIComponent(profileId)+'?top_k=20');const rec=await rr.json();render(rec.matches);$('searchStatus').textContent=rec.matches.length+' recommendations from your resume'}
   }catch(_){}
 }
 fetch('/health').then(r=>r.json()).then(d=>{const el=$('health');el.classList.add('ok');el.querySelector('span:last-child').textContent='v'+d.version+' · online'}).catch(()=>{$('health').querySelector('span:last-child').textContent='offline'});
