@@ -1,6 +1,6 @@
 [project]
 name = "boardforge"
-version = "0.4.0"
+version = "0.5.0"
 description = "Self-learning job intelligence infrastructure with ATS connectors, temporal indexing, personalization and evals."
 requires-python = ">=3.11"
 dependencies = [
@@ -8,6 +8,8 @@ dependencies = [
   "uvicorn[standard]>=0.34,<1",
   "httpx>=0.28,<1",
   "pydantic>=2.10,<3",
+  "pypdf>=5.1,<7",
+  "python-docx>=1.1,<2",
 ]
 
 [project.optional-dependencies]
