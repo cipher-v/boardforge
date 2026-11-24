@@ -12,7 +12,7 @@ from boardforge.benchmark import run_benchmark
 from boardforge.comparison import comparison_markdown, run_comparison, run_embedding_comparison
 from boardforge.preference_eval import run_preference_eval
 from boardforge.resume_eval import run_resume_eval
-from boardforge.real_eval import build_corpus_snapshot
+from boardforge.real_eval import build_corpus_snapshot, run_real_eval
 from boardforge.semantic import EmbeddingClient, warm_job_embeddings
 from boardforge.workers import sync_due_sources
 from boardforge.discovery.har import discover_from_har
@@ -108,6 +108,20 @@ def main() -> None:
         help="Include source_kind=test rows. Excluded by default.",
     )
 
+    p_real_eval = sub.add_parser("real-eval")
+    p_real_eval.add_argument(
+        "--corpus",
+        default="results/india-corpus.json",
+        help="Frozen corpus created by snapshot-eval-corpus.",
+    )
+    p_real_eval.add_argument("--dataset", default=None)
+    p_real_eval.add_argument("--top-k", type=int, default=5)
+    p_real_eval.add_argument(
+        "--details",
+        action="store_true",
+        help="Print all per-query rows instead of a compact summary.",
+    )
+
     args = parser.parse_args()
 
     if args.cmd == "benchmark":
@@ -199,6 +213,29 @@ def main() -> None:
             "jobs": len(payload["jobs"]),
             "excluded_test_jobs": payload["excluded_test_jobs"],
         })
+        return
+
+    if args.cmd == "real-eval":
+        report = asyncio.run(
+            run_real_eval(args.corpus, args.dataset, args.top_k)
+            if args.dataset
+            else run_real_eval(args.corpus, top_k=args.top_k)
+        )
+        if args.details or report.get("status") != "ok":
+            _print_json(report)
+        else:
+            _print_json({
+                "status": report["status"],
+                "dataset_version": report["dataset_version"],
+                "corpus_snapshot": report["corpus_snapshot"],
+                "cases": report["cases"],
+                "top_k": report["top_k"],
+                "embedding_model": report["embedding_model"],
+                "macro": report["macro"],
+                "by_family": report["by_family"],
+                "failure_count": report["failure_count"],
+                "failures": report["failures"][:8],
+            })
         return
 
     store = create_store()
