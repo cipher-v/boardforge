@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 import pytest
@@ -61,8 +62,7 @@ class _FakeProvider:
         return out
 
 
-@pytest.mark.asyncio
-async def test_real_eval_runs_against_frozen_corpus(tmp_path):
+def test_real_eval_runs_against_frozen_corpus(tmp_path):
     ml = _job("ml", "Machine Learning Engineer", "Acme", "India")
     sales = _job("sales", "Sales Executive", "Beta", "India")
     corpus = {
@@ -86,12 +86,12 @@ async def test_real_eval_runs_against_frozen_corpus(tmp_path):
     corpus_path.write_text(json.dumps(corpus), encoding="utf-8")
     dataset_path.write_text(json.dumps(dataset), encoding="utf-8")
 
-    report = await run_real_eval(
+    report = asyncio.run(run_real_eval(
         corpus_path,
         dataset_path,
         top_k=2,
         client=EmbeddingClient(_FakeProvider()),
-    )
+    ))
 
     assert report["status"] == "ok"
     assert report["corpus_snapshot"]["jobs"] == 2
@@ -100,8 +100,7 @@ async def test_real_eval_runs_against_frozen_corpus(tmp_path):
     assert report["macro"]["top1_accuracy"] == 1.0
 
 
-@pytest.mark.asyncio
-async def test_real_eval_rejects_labels_for_missing_jobs(tmp_path):
+def test_real_eval_rejects_labels_for_missing_jobs(tmp_path):
     ml = _job("ml", "Machine Learning Engineer", "Acme", "India")
     corpus_path = tmp_path / "corpus.json"
     dataset_path = tmp_path / "dataset.json"
@@ -124,8 +123,8 @@ async def test_real_eval_rejects_labels_for_missing_jobs(tmp_path):
     )
 
     with pytest.raises(ValueError, match="missing from the frozen corpus"):
-        await run_real_eval(
+        asyncio.run(run_real_eval(
             corpus_path,
             dataset_path,
             client=EmbeddingClient(_FakeProvider()),
-        )
+        ))
