@@ -8,6 +8,9 @@ It is intentionally not another generic RAG demo or auto-apply bot.
 
 ## What it does
 
+- Accepts PDF/DOCX resumes, extracts a structured candidate profile, and uses it as soft ranking context
+- Produces automatic resume-based recommendations while keeping manual search and explicit preferences authoritative
+
 - Detects public ATS providers from career URLs
 - Fetches live jobs from Greenhouse, Lever and Ashby
 - Falls back to JSON-LD JobPosting extraction for generic career pages
