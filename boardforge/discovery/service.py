@@ -76,10 +76,15 @@ async def run_discovery_request(
             client=client,
         )
         if report.failures and report.synced_boards == 0:
-            store.retry_discovery(
-                request_id,
-                f"discovery had {report.failures} failures and no successful board sync",
-            )
+            if report.retryable:
+                store.retry_discovery(
+                    request_id,
+                    report.reason or (
+                        f"discovery had {report.failures} failures and no successful board sync"
+                    ),
+                )
+            else:
+                store.finish_discovery(request_id, report.as_dict(), failed=True)
         else:
             store.finish_discovery(request_id, report.as_dict())
     except Exception as exc:  # keep failures inspectable without breaking search
