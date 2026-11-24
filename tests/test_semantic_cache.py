@@ -55,3 +55,41 @@ def test_job_embeddings_are_reused_until_content_changes(tmp_path: Path):
     changed = [make_job("1", "Python APIs and retrieval"), jobs[1]]
     run(changed, client, store)
     assert [len(call) for call in client.calls] == [1, 2, 1, 1, 1]
+
+
+def test_hybrid_keeps_verified_matches_ahead_of_needs_verification(tmp_path: Path):
+    store = Store(str(tmp_path / "verify.db"))
+    client = FakeEmbeddings()
+    jobs = [
+        Job(
+            source_kind="benchmark",
+            source_key="verify",
+            external_id="known",
+            title="AI Engineer",
+            company="Demo",
+            country="India",
+            salary_currency="INR",
+            salary_min=1400000,
+            salary_period="year",
+        ),
+        Job(
+            source_kind="benchmark",
+            source_key="verify",
+            external_id="unknown",
+            title="AI Engineer",
+            company="Demo",
+            country="India",
+            description="Python AI retrieval",
+        ),
+    ]
+    matches = asyncio.run(hybrid_rank_jobs(
+        jobs,
+        Preferences(roles=["AI/ML"], countries=["India"], min_salary_lpa=12),
+        query="Python AI retrieval",
+        top_k=10,
+        rejected_ids=set(),
+        client=client,
+        store=store,
+    ))
+    assert matches[0].job.external_id == "known"
+    assert matches[1].status == "needs_verification"
