@@ -1,5 +1,6 @@
 from boardforge.matching import hard_violations, rank_jobs, role_evidence
 from boardforge.models import Job, Preferences
+from boardforge.preferences import deterministic_extract
 
 
 def job(ext: str, title: str, *, country="India", desc="", remote="unknown", min_exp=None):
@@ -116,3 +117,30 @@ def test_explicitly_unpaid_is_below_positive_salary_floor():
     unpaid = job("unpaid", "ML Engineer", desc="Unpaid internship. No stipend.")
     assert "salary" in hard_violations(unpaid, p)
     assert rank_jobs([unpaid], p) == []
+
+
+
+def test_llm_query_extracts_ai_ml_role_intent():
+    p = deterministic_extract("LLM agents retrieval ranking India")
+    assert p.roles == ["AI/ML"]
+    assert p.countries == ["India"]
+
+
+def test_ai_ml_role_evidence_accepts_specialized_engineering_titles_not_generic_leadership():
+    assert role_evidence(job("ai-platform", "Staff Software Engineer, AI Platform"), "AI/ML") is not None
+    assert role_evidence(job("genai", "Generative AI Developer"), "AI/ML") is not None
+    assert role_evidence(job("principal", "Principal Engineer (L5)"), "AI/ML") is None
+    assert role_evidence(job("manager", "Senior Engineering Manager (L5)"), "AI/ML") is None
+    assert role_evidence(job("architect", "Principal Enterprise Architect"), "AI/ML") is None
+
+
+def test_llm_query_excludes_generic_engineering_leadership_roles():
+    p = deterministic_extract("LLM agents retrieval ranking India")
+    jobs = [
+        job("ml", "Machine Learning Engineer", desc="LLM retrieval systems"),
+        job("ai-platform", "Staff Software Engineer, AI Platform", desc="Agents and retrieval"),
+        job("principal", "Principal Engineer (L5)", desc="LLM retrieval architecture"),
+        job("manager", "Senior Engineering Manager (L5)", desc="AI agents organization"),
+    ]
+    ranked = rank_jobs(jobs, p, query="LLM agents retrieval ranking India", top_k=10)
+    assert [match.job.external_id for match in ranked] == ["ai-platform", "ml"]
