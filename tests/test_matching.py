@@ -1,4 +1,4 @@
-from boardforge.matching import hard_violations, rank_jobs, role_evidence
+from boardforge.matching import hard_violations, query_topic_evidence, rank_jobs, role_evidence
 from boardforge.models import Job, Preferences
 from boardforge.preferences import deterministic_extract
 
@@ -146,3 +146,80 @@ def test_llm_query_excludes_generic_engineering_leadership_roles():
     ]
     ranked = rank_jobs(jobs, p, query="LLM agents retrieval ranking India", top_k=10)
     assert [match.job.external_id for match in ranked] == ["ai-platform", "ml"]
+
+
+
+def test_ai_ml_role_can_be_substantiated_by_generic_software_engineering_jd():
+    candidate = job(
+        "fraud",
+        "Software Engineer (L3)",
+        desc=(
+            "Scope, design, and deploy machine learning systems into production. "
+            "Build anti-fraud and anti-abuse distributed services."
+        ),
+    )
+    item = role_evidence(candidate, "AI/ML")
+    assert item is not None
+    assert "description substantiated" in item.detail
+
+
+def test_backend_role_can_be_substantiated_by_security_platform_jd():
+    candidate = job(
+        "security",
+        "Software Engineer, Security Platform",
+        desc="Build backend systems and service-oriented architecture at scale.",
+    )
+    assert role_evidence(candidate, "Backend") is not None
+
+
+def test_data_engineering_role_can_be_substantiated_by_data_platform_jd():
+    candidate = job(
+        "data-platform",
+        "Senior Software Engineer - Data Platform",
+        desc="Build data pipelines, data services, Airflow orchestration, and a data lake.",
+    )
+    assert role_evidence(candidate, "Data Engineering") is not None
+
+
+def test_description_role_fallback_does_not_promote_manager_or_architect():
+    manager = job(
+        "manager-ai",
+        "Senior Engineering Manager",
+        desc="Lead teams building machine learning systems and LLM orchestration.",
+    )
+    architect = job(
+        "architect-data",
+        "Principal Enterprise Architect",
+        desc="Own data platform, data pipelines, and Airflow architecture.",
+    )
+    assert role_evidence(manager, "AI/ML") is None
+    assert role_evidence(architect, "Data Engineering") is None
+
+
+def test_query_topic_evidence_ignores_geography_and_generic_role_words():
+    candidate = job(
+        "sales",
+        "Sales Executive",
+        desc="India enterprise account management",
+    )
+    prefs = Preferences(countries=["India"])
+    assert query_topic_evidence(
+        candidate,
+        prefs,
+        "machine learning engineer India",
+    ) is None
+
+
+def test_query_topic_evidence_requires_substantial_specific_overlap():
+    candidate = job(
+        "salesforce",
+        "Applications Engineer 2",
+        desc="Salesforce developer for GTM automation workflows.",
+    )
+    item = query_topic_evidence(
+        candidate,
+        Preferences(countries=["India"]),
+        "Salesforce developer GTM automation India",
+    )
+    assert item is not None
+    assert item.kind == "query_topic"
