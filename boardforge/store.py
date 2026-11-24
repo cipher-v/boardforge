@@ -316,12 +316,13 @@ class Store:
         limit: int = 250,
         query_vector: list[float] | None = None,
         embedding_model: str = "",
+        preferences: Preferences | None = None,
     ) -> list[Job]:
         """SQLite fallback keeps exact behavior for local demos and tests.
 
         PostgreSQL overrides this with indexed full-text/vector retrieval.
         """
-        del query, query_vector, embedding_model
+        del query, query_vector, embedding_model, preferences
         return self.active_jobs()[:max(1, limit)]
 
     def embedding_candidates(self, model: str, *, limit: int = 100) -> list[Job]:
