@@ -115,6 +115,27 @@ Populate or refresh missing job embeddings with:
 python -m boardforge.cli embed-index --batch-size 64 --max-jobs 10000
 ```
 
+### Vertex Gemini embeddings
+
+The production semantic-retrieval path can use Vertex AI with an explicit
+768-dimensional embedding contract:
+
+```text
+BOARDFORGE_EMBEDDING_PROVIDER=vertex
+BOARDFORGE_EMBEDDING_MODEL=gemini-embedding-001
+BOARDFORGE_EMBEDDING_DIMENSIONS=768
+GOOGLE_CLOUD_PROJECT=your-project-id
+GOOGLE_CLOUD_LOCATION=us-central1
+BOARDFORGE_ENABLE_EMBEDDINGS=1
+```
+
+BoardForge embeds indexed job documents with `RETRIEVAL_DOCUMENT` and search
+queries with `RETRIEVAL_QUERY`. PostgreSQL stores only 768-dimensional vectors,
+and model/provider/dimension are part of the cache key so incompatible embedding
+spaces are not mixed. Local development uses Google Application Default
+Credentials; deployed environments should use their workload/service identity
+rather than committed credential files.
+
 The included browser UI is intentionally a single-user local demo. It stores the
 extracted profile, preferences and feedback in SQLite, never the raw resume, and
 provides a **Delete my data** action. Add real authentication and per-user
