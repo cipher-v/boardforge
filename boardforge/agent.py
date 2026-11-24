@@ -57,6 +57,43 @@ class JobAgent:
             },
         )
 
+    async def recommend_jobs(self, profile_id: str, top_k: int = 20) -> AgentResult:
+        """Broader resume-led recommendations; role families are soft signals here."""
+        saved = self.store.load_preferences(profile_id)
+        candidate_profile = self.store.load_candidate_profile(profile_id)
+        if candidate_profile is None:
+            return await self.search_jobs(profile_id, "", top_k)
+
+        prefs = saved.model_copy(deep=True)
+        saved_roles = list(prefs.roles)
+        prefs.roles = []
+        prefs = apply_candidate_context(prefs, candidate_profile)
+
+        resume_query = " ".join(
+            saved_roles
+            + candidate_profile.role_signals
+            + candidate_profile.skills[:12]
+            + candidate_profile.domains[:4]
+        ).strip()
+
+        matches = await hybrid_rank_jobs(
+            self.store.active_jobs(),
+            prefs,
+            query=resume_query,
+            top_k=top_k,
+            rejected_ids=self.store.rejected_job_ids(profile_id),
+            client=self.embeddings,
+            store=self.store,
+        )
+        return AgentResult(
+            f"Found {len(matches)} resume-based recommendations.",
+            {
+                "matches": [m.model_dump(mode="json") for m in matches],
+                "profile_used": True,
+                "mode": "resume_recommendations",
+            },
+        )
+
     async def record_feedback(self, req: FeedbackRequest) -> AgentResult:
         self.store.record_feedback(req)
         return AgentResult("Feedback recorded.", req.model_dump())
