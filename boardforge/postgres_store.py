@@ -220,16 +220,32 @@ class PostgresStore:
             ).fetchall()
         return self._jobs(rows)
 
-    def embedding_candidates(self, model: str, *, limit: int = 100) -> list[Job]:
+    def embedding_candidates(
+        self,
+        model: str,
+        *,
+        limit: int = 100,
+        countries: list[str] | None = None,
+    ) -> list[Job]:
+        country_clause = ""
+        params: list = [model]
+        if countries:
+            country_clause = (
+                " AND lower(COALESCE(j.payload->>'country','')) = ANY(%s)"
+            )
+            params.append([country.casefold() for country in countries])
+        params.append(max(1, min(limit, 1000)))
+
         with self.connect() as connection:
             rows = connection.execute(
                 """SELECT j.payload,j.first_seen,j.last_seen
                    FROM jobs j LEFT JOIN job_embeddings e
                      ON e.stable_id=j.stable_id AND e.model=%s
                    WHERE j.status='active'
-                     AND (e.stable_id IS NULL OR e.content_hash<>j.embedding_hash)
-                   ORDER BY j.last_seen DESC LIMIT %s""",
-                (model, max(1, min(limit, 1000))),
+                     AND (e.stable_id IS NULL OR e.content_hash<>j.embedding_hash)"""
+                + country_clause
+                + " ORDER BY j.last_seen DESC LIMIT %s",
+                tuple(params),
             ).fetchall()
         return self._jobs(rows)
 
