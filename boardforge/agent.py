@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from boardforge.models import FeedbackRequest
 from boardforge.planning import plan_tools
 from boardforge.preferences import LLMPreferenceExtractor, effective_search_preferences
+from boardforge.resume import apply_candidate_context
 from boardforge.semantic import EmbeddingClient, hybrid_rank_jobs
 from boardforge.store import Store
 
@@ -36,6 +37,9 @@ class JobAgent:
     async def search_jobs(self, profile_id: str, query: str = "", top_k: int = 10) -> AgentResult:
         saved = self.store.load_preferences(profile_id)
         prefs = effective_search_preferences(saved, query) if query else saved
+        candidate_profile = self.store.load_candidate_profile(profile_id)
+        if candidate_profile:
+            prefs = apply_candidate_context(prefs, candidate_profile)
         matches = await hybrid_rank_jobs(
             self.store.active_jobs(),
             prefs,
@@ -47,7 +51,10 @@ class JobAgent:
         )
         return AgentResult(
             f"Found {len(matches)} ranked jobs.",
-            {"matches":[m.model_dump(mode="json") for m in matches]},
+            {
+                "matches":[m.model_dump(mode="json") for m in matches],
+                "profile_used": candidate_profile is not None,
+            },
         )
 
     async def record_feedback(self, req: FeedbackRequest) -> AgentResult:
