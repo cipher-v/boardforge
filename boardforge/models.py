@@ -38,6 +38,8 @@ class Job(BaseModel):
     tags: list[str] = Field(default_factory=list)
     posted_at: datetime | None = None
     updated_at: datetime | None = None
+    first_seen_at: datetime | None = None
+    last_seen_at: datetime | None = None
 
     @property
     def stable_id(self) -> str:
@@ -61,9 +63,28 @@ class Preferences(BaseModel):
 class CandidateProfile(BaseModel):
     skills: list[str] = Field(default_factory=list)
     role_signals: list[str] = Field(default_factory=list)
+    target_roles: list[str] = Field(default_factory=list)
     domains: list[str] = Field(default_factory=list)
     education: list[str] = Field(default_factory=list)
+    projects: list[str] = Field(default_factory=list)
+    experience: list[str] = Field(default_factory=list)
+    evidence: list["CandidateEvidence"] = Field(default_factory=list)
+    reviewed: bool = False
     resume_filename: str = ""
+
+
+class CandidateEvidence(BaseModel):
+    kind: Literal["skill", "role", "domain", "education", "project", "experience"]
+    value: str
+    snippet: str
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
+class CandidateProfileUpdate(BaseModel):
+    skills: list[str] | None = None
+    target_roles: list[str] | None = None
+    domains: list[str] | None = None
+    reviewed: bool = True
 
 
 class MatchEvidence(BaseModel):

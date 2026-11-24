@@ -1,0 +1,54 @@
+{
+  "dataset_version": "1.0",
+  "description": "Synthetic resume snippets for deterministic profile-extraction regression testing.",
+  "cases": [
+    {
+      "name": "llm_backend",
+      "text": "Projects\nBuilt a RAG assistant using Python, FastAPI, PostgreSQL, embeddings and FAISS. Deployed the API with Docker.",
+      "expected_skills": ["Python", "PostgreSQL", "FastAPI", "RAG", "Embeddings", "FAISS", "Docker"],
+      "expected_roles": ["AI/ML", "Backend"]
+    },
+    {
+      "name": "computer_vision",
+      "text": "Computer Vision Intern\nDeveloped object detection and image segmentation pipelines with Python, PyTorch, OpenCV and YOLO.",
+      "expected_skills": ["Python", "PyTorch", "OpenCV", "YOLO"],
+      "expected_roles": ["AI/ML", "Computer Vision"]
+    },
+    {
+      "name": "data_engineering",
+      "text": "Data Engineer\nImplemented ETL workflows using Python, SQL, PostgreSQL, Apache Spark and Airflow on AWS.",
+      "expected_skills": ["Python", "SQL", "PostgreSQL", "AWS", "Spark", "Airflow"],
+      "expected_roles": ["Backend", "Data Engineering"]
+    },
+    {
+      "name": "frontend_software",
+      "text": "Software Engineer Intern\nBuilt accessible web applications using TypeScript, JavaScript and React. Shipped through Docker and GitHub Actions.",
+      "expected_skills": ["JavaScript", "TypeScript", "React", "Docker", "Git"],
+      "expected_roles": ["Software Engineering"]
+    },
+    {
+      "name": "classical_data_science",
+      "text": "Data Scientist\nCreated statistical forecasting models using Python, pandas, NumPy and scikit-learn with SQL analytics.",
+      "expected_skills": ["Python", "SQL", "scikit-learn", "Pandas", "NumPy"],
+      "expected_roles": ["AI/ML", "Data Science"]
+    },
+    {
+      "name": "java_platform",
+      "text": "Platform Engineer\nDeveloped server-side services in Java with REST APIs, Kubernetes, Docker and AWS infrastructure.",
+      "expected_skills": ["Java", "Docker", "Kubernetes", "AWS", "REST APIs"],
+      "expected_roles": ["Backend", "Software Engineering"]
+    },
+    {
+      "name": "education_and_project",
+      "text": "B.Tech Computer Science, Example University\nProjects\nDesigned a Flask API backed by PostgreSQL and deployed it using Docker.",
+      "expected_skills": ["PostgreSQL", "Flask", "Docker"],
+      "expected_roles": ["Backend", "Software Engineering"]
+    },
+    {
+      "name": "retrieval_research",
+      "text": "Research Engineer\nImplemented semantic search and retrieval-augmented generation with Python, LLMs, embeddings and PyTorch.",
+      "expected_skills": ["Python", "PyTorch", "LLMs", "RAG", "Embeddings"],
+      "expected_roles": ["AI/ML"]
+    }
+  ]
+}

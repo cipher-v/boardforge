@@ -4,7 +4,7 @@ import re
 from io import BytesIO
 from pathlib import Path
 
-from boardforge.models import CandidateProfile, Preferences
+from boardforge.models import CandidateEvidence, CandidateProfile, Preferences
 
 
 SKILL_ALIASES: dict[str, tuple[str, ...]] = {
@@ -95,6 +95,14 @@ def _unique(values: list[str]) -> list[str]:
     return out
 
 
+def _evidence_snippet(text: str, patterns: tuple[str, ...], fallback: str) -> str:
+    for line in text.splitlines():
+        cleaned = " ".join(line.split())
+        if cleaned and _matches_any(cleaned, patterns):
+            return cleaned[:220]
+    return fallback[:220]
+
+
 def extract_candidate_profile(text: str, *, filename: str = "") -> CandidateProfile:
     normalized = " ".join(text.split())
 
@@ -141,18 +149,63 @@ def extract_candidate_profile(text: str, *, filename: str = "") -> CandidateProf
         role_signals.append("Data Science")
 
     education: list[str] = []
+    projects: list[str] = []
+    experience: list[str] = []
     for line in text.splitlines():
         cleaned = " ".join(line.split())
         if cleaned and EDUCATION_RE.search(cleaned):
             education.append(cleaned[:180])
-        if len(education) >= 5:
-            break
+        if re.search(r"\b(?:built|developed|implemented|created|designed|shipped)\b", cleaned, re.I):
+            projects.append(cleaned[:220])
+        if (
+            re.search(r"\b(?:intern(?:ship)?|experience|engineer|developer|researcher)\b", cleaned, re.I)
+            and not EDUCATION_RE.search(cleaned)
+            and not re.match(r"^(?:projects?|skills?|experience)\s*:?$", cleaned, re.I)
+        ):
+            experience.append(cleaned[:220])
+
+    education = _unique(education)[:5]
+    projects = _unique(projects)[:5]
+    experience = _unique(experience)[:5]
+
+    evidence: list[CandidateEvidence] = []
+    for canonical, patterns in SKILL_ALIASES.items():
+        if canonical in skills:
+            evidence.append(CandidateEvidence(
+                kind="skill",
+                value=canonical,
+                snippet=_evidence_snippet(text, patterns, canonical),
+                confidence=0.9,
+            ))
+    for role in role_signals:
+        supporting = next(
+            (line for line in projects + experience if role.casefold().split("/")[0] in line.casefold()),
+            projects[0] if projects else role,
+        )
+        evidence.append(CandidateEvidence(
+            kind="role", value=role, snippet=supporting, confidence=0.65,
+        ))
+    for item in education:
+        evidence.append(CandidateEvidence(
+            kind="education", value=item, snippet=item, confidence=0.85,
+        ))
+    for item in projects:
+        evidence.append(CandidateEvidence(
+            kind="project", value=item[:80], snippet=item, confidence=0.8,
+        ))
+    for item in experience:
+        evidence.append(CandidateEvidence(
+            kind="experience", value=item[:80], snippet=item, confidence=0.7,
+        ))
 
     return CandidateProfile(
         skills=_unique(skills),
         role_signals=_unique(role_signals),
         domains=_unique(domains),
-        education=_unique(education),
+        education=education,
+        projects=projects,
+        experience=experience,
+        evidence=evidence[:30],
         resume_filename=Path(filename).name if filename else "",
     )
 
@@ -162,7 +215,7 @@ def apply_candidate_context(preferences: Preferences, profile: CandidateProfile)
     out = preferences.model_copy(deep=True)
     avoided = {term.casefold() for term in out.avoid_terms}
 
-    soft_terms = profile.skills[:10] + profile.domains[:4]
+    soft_terms = profile.skills[:10] + profile.domains[:4] + profile.role_signals[:3]
     for term in soft_terms:
         if term.casefold() in avoided:
             continue

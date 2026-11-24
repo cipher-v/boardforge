@@ -1,6 +1,12 @@
 # Evaluation
 
-BoardForge evaluates the system at five layers.
+BoardForge evaluates the system at six layers.
+
+## Candidate profile extraction
+- skill precision / recall / F1
+- inferred-role precision / recall / F1
+- evidence-snippet coverage
+- candidate review and correction behavior
 
 ## Ingestion
 - connector success rate
@@ -117,6 +123,17 @@ python -m boardforge.cli preference-eval
 ```
 
 The packaged 20-case suite checks natural-language additions, removals, negation, aliases, geography changes, salary relaxation, experience ceilings and work-policy changes. It compares extracted preference fields against versioned expected state.
+
+## Resume profile extraction benchmark
+
+```bash
+python -m boardforge.cli resume-eval
+```
+
+The packaged versioned suite measures skill and role extraction from synthetic
+resume snippets. It is a deterministic regression set, not evidence of real-world
+resume quality. The next step is a consented, de-identified labeled set containing
+layout variation, ambiguous skills, career transitions and extraction corrections.
 
 ## Metric definitions
 

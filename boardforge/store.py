@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from boardforge.models import CandidateProfile, FeedbackRequest, Job, Preferences, SyncSummary
@@ -87,6 +88,36 @@ CREATE TABLE IF NOT EXISTS feedback (
 );
 
 CREATE INDEX IF NOT EXISTS idx_feedback_profile ON feedback(profile_id, created_at);
+
+CREATE TABLE IF NOT EXISTS discovery_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  profile_id TEXT NOT NULL,
+  fingerprint TEXT NOT NULL,
+  query TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL,
+  report TEXT,
+  requested_at TEXT NOT NULL,
+  started_at TEXT,
+  completed_at TEXT,
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at TEXT,
+  last_error TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_discovery_fingerprint
+  ON discovery_requests(fingerprint, requested_at);
+
+CREATE TABLE IF NOT EXISTS discovered_sources (
+  source_kind TEXT NOT NULL,
+  source_key TEXT NOT NULL,
+  board_url TEXT NOT NULL,
+  discovery_query TEXT NOT NULL DEFAULT '',
+  first_discovered TEXT NOT NULL,
+  last_discovered TEXT NOT NULL,
+  last_synced TEXT,
+  last_status TEXT NOT NULL DEFAULT 'discovered',
+  PRIMARY KEY(source_kind, source_key)
+);
 """
 
 
@@ -110,6 +141,22 @@ class Store:
                 connection.execute(
                     "ALTER TABLE jobs ADD COLUMN missing_count INTEGER NOT NULL DEFAULT 0"
                 )
+            discovery_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(discovery_requests)")
+            }
+            if "started_at" not in discovery_columns:
+                connection.execute(
+                    "ALTER TABLE discovery_requests ADD COLUMN started_at TEXT"
+                )
+            for statement in (
+                "ALTER TABLE discovery_requests ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE discovery_requests ADD COLUMN next_attempt_at TEXT",
+                "ALTER TABLE discovery_requests ADD COLUMN last_error TEXT",
+            ):
+                column = statement.split("ADD COLUMN ", 1)[1].split()[0]
+                if column not in discovery_columns:
+                    connection.execute(statement)
 
     @contextmanager
     def connect(self):
@@ -123,6 +170,10 @@ class Store:
             raise
         finally:
             connection.close()
+
+    def ping(self) -> bool:
+        with self.connect() as connection:
+            return connection.execute("SELECT 1").fetchone()[0] == 1
 
     @staticmethod
     def _record_event(
@@ -247,8 +298,35 @@ class Store:
 
     def active_jobs(self) -> list[Job]:
         with self.connect() as connection:
-            rows = connection.execute("SELECT payload FROM jobs WHERE status='active'").fetchall()
-        return [Job.model_validate_json(row["payload"]) for row in rows]
+            rows = connection.execute(
+                "SELECT payload,first_seen,last_seen FROM jobs WHERE status='active'"
+            ).fetchall()
+        return [
+            Job.model_validate_json(row["payload"]).model_copy(update={
+                "first_seen_at": datetime.fromisoformat(row["first_seen"]),
+                "last_seen_at": datetime.fromisoformat(row["last_seen"]),
+            })
+            for row in rows
+        ]
+
+    def candidate_jobs(
+        self,
+        query: str,
+        *,
+        limit: int = 250,
+        query_vector: list[float] | None = None,
+        embedding_model: str = "",
+    ) -> list[Job]:
+        """SQLite fallback keeps exact behavior for local demos and tests.
+
+        PostgreSQL overrides this with indexed full-text/vector retrieval.
+        """
+        del query, query_vector, embedding_model
+        return self.active_jobs()[:max(1, limit)]
+
+    def embedding_candidates(self, model: str, *, limit: int = 100) -> list[Job]:
+        del model
+        return self.active_jobs()[:max(1, limit)]
 
     def job_status(self, stable_id: str) -> str | None:
         with self.connect() as connection:
@@ -325,6 +403,206 @@ class Store:
                 "SELECT profile FROM candidate_profiles WHERE profile_id=?", (profile_id,)
             ).fetchone()
         return CandidateProfile.model_validate_json(row["profile"]) if row else None
+
+    def delete_profile(self, profile_id: str) -> None:
+        """Delete candidate-owned state. The shared public job index is retained."""
+        with self.connect() as connection:
+            connection.execute("DELETE FROM candidate_profiles WHERE profile_id=?", (profile_id,))
+            connection.execute("DELETE FROM profiles WHERE profile_id=?", (profile_id,))
+            connection.execute("DELETE FROM feedback WHERE profile_id=?", (profile_id,))
+            connection.execute("DELETE FROM discovery_requests WHERE profile_id=?", (profile_id,))
+
+    def queue_discovery(
+        self,
+        profile_id: str,
+        fingerprint: str,
+        query: str,
+        *,
+        ttl_seconds: int = 900,
+    ) -> dict:
+        now = datetime.now(timezone.utc)
+        with self.connect() as connection:
+            row = connection.execute(
+                """SELECT * FROM discovery_requests WHERE fingerprint=?
+                   ORDER BY id DESC LIMIT 1""",
+                (fingerprint,),
+            ).fetchone()
+            if row is not None:
+                age = (now - datetime.fromisoformat(row["requested_at"])).total_seconds()
+                if row["status"] in {"queued", "running"} or (
+                    row["status"] == "completed" and age < ttl_seconds
+                ):
+                    return self._discovery_row(row, cached=True)
+            cursor = connection.execute(
+                """INSERT INTO discovery_requests
+                   (profile_id,fingerprint,query,status,requested_at)
+                   VALUES(?,?,?,'queued',?)""",
+                (profile_id, fingerprint, query, now.isoformat()),
+            )
+            request_id = int(cursor.lastrowid)
+        return {
+            "request_id": request_id,
+            "status": "queued",
+            "cached": False,
+            "report": None,
+        }
+
+    @staticmethod
+    def _discovery_row(row: sqlite3.Row, *, cached: bool = False) -> dict:
+        return {
+            "request_id": int(row["id"]),
+            "status": row["status"],
+            "cached": cached,
+            "report": json.loads(row["report"]) if row["report"] else None,
+            "attempt_count": int(row["attempt_count"]),
+            "last_error": row["last_error"],
+        }
+
+    def discovery_request(self, request_id: int) -> dict | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM discovery_requests WHERE id=?", (request_id,)
+            ).fetchone()
+        return self._discovery_row(row) if row else None
+
+    def start_discovery(self, request_id: int) -> bool:
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """UPDATE discovery_requests SET status='running',started_at=?,
+                   attempt_count=attempt_count+1,next_attempt_at=NULL
+                   WHERE id=? AND status='queued'""",
+                (_utcnow(), request_id),
+            )
+        return cursor.rowcount == 1
+
+    def pending_discoveries(self, limit: int = 10) -> list[dict]:
+        now = _utcnow()
+        with self.connect() as connection:
+            rows = connection.execute(
+                """SELECT id,profile_id,query FROM discovery_requests
+                   WHERE status='queued' AND (next_attempt_at IS NULL OR next_attempt_at<=?)
+                   ORDER BY id LIMIT ?""",
+                (now, max(1, min(limit, 100))),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def claim_discoveries(self, limit: int = 10) -> list[dict]:
+        now = _utcnow()
+        with self.connect() as connection:
+            rows = connection.execute(
+                """SELECT id,profile_id,query FROM discovery_requests
+                   WHERE status='queued' AND (next_attempt_at IS NULL OR next_attempt_at<=?)
+                   ORDER BY id LIMIT ?""",
+                (now, max(1, min(limit, 100))),
+            ).fetchall()
+            for row in rows:
+                connection.execute(
+                    """UPDATE discovery_requests SET status='running',started_at=?,
+                       attempt_count=attempt_count+1,next_attempt_at=NULL
+                       WHERE id=? AND status='queued'""",
+                    (now, row["id"]),
+                )
+        return [dict(row) for row in rows]
+
+    def requeue_stale_discoveries(self, stale_seconds: int = 900) -> int:
+        cutoff = datetime.now(timezone.utc).timestamp() - max(60, stale_seconds)
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT id,started_at FROM discovery_requests WHERE status='running'"
+            ).fetchall()
+            stale_ids = [
+                row["id"] for row in rows
+                if row["started_at"] is not None
+                and datetime.fromisoformat(row["started_at"]).timestamp() < cutoff
+            ]
+            if stale_ids:
+                connection.executemany(
+                    """UPDATE discovery_requests SET status='queued',started_at=NULL
+                       WHERE id=?""",
+                    [(request_id,) for request_id in stale_ids],
+                )
+        return len(stale_ids)
+
+    def finish_discovery(self, request_id: int, report: dict, *, failed: bool = False) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """UPDATE discovery_requests SET status=?,report=?,completed_at=? WHERE id=?""",
+                ("failed" if failed else "completed", json.dumps(report), _utcnow(), request_id),
+            )
+
+    def retry_discovery(self, request_id: int, error: str, *, max_attempts: int = 3) -> str:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT attempt_count FROM discovery_requests WHERE id=?", (request_id,)
+            ).fetchone()
+            if row is None:
+                return "missing"
+            attempts = int(row["attempt_count"])
+            if attempts >= max_attempts:
+                connection.execute(
+                    """UPDATE discovery_requests SET status='failed',last_error=?,completed_at=?
+                       WHERE id=?""",
+                    (error[:1000], _utcnow(), request_id),
+                )
+                return "failed"
+            delay = min(300, 5 * (2 ** max(0, attempts - 1)))
+            next_attempt = datetime.now(timezone.utc) + timedelta(seconds=delay)
+            connection.execute(
+                """UPDATE discovery_requests SET status='queued',started_at=NULL,
+                   next_attempt_at=?,last_error=? WHERE id=?""",
+                (next_attempt.isoformat(), error[:1000], request_id),
+            )
+        return "queued"
+
+    def record_discovered_source(
+        self,
+        source_kind: str,
+        source_key: str,
+        board_url: str,
+        query: str,
+        *,
+        synced: bool = False,
+        status: str = "discovered",
+    ) -> None:
+        now = _utcnow()
+        with self.connect() as connection:
+            connection.execute(
+                """INSERT INTO discovered_sources
+                   (source_kind,source_key,board_url,discovery_query,first_discovered,
+                    last_discovered,last_synced,last_status)
+                   VALUES(?,?,?,?,?,?,?,?)
+                   ON CONFLICT(source_kind,source_key) DO UPDATE SET
+                     board_url=excluded.board_url,
+                     discovery_query=excluded.discovery_query,
+                     last_discovered=excluded.last_discovered,
+                     last_synced=COALESCE(excluded.last_synced,discovered_sources.last_synced),
+                     last_status=excluded.last_status""",
+                (
+                    source_kind, source_key, board_url, query, now, now,
+                    now if synced else None, status,
+                ),
+            )
+
+    def discovered_sources(self) -> list[dict]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """SELECT source_kind,source_key,board_url,discovery_query,
+                          first_discovered,last_discovered,last_synced,last_status
+                   FROM discovered_sources ORDER BY source_kind,source_key"""
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def sources_due(self, *, interval_seconds: int = 3600, limit: int = 25) -> list[dict]:
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=max(60, interval_seconds))
+        with self.connect() as connection:
+            rows = connection.execute(
+                """SELECT source_kind,source_key,board_url,last_synced,last_status
+                   FROM discovered_sources
+                   WHERE last_synced IS NULL OR last_synced<=?
+                   ORDER BY COALESCE(last_synced,first_discovered) LIMIT ?""",
+                (cutoff.isoformat(), max(1, min(limit, 500))),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def record_feedback(self, request: FeedbackRequest) -> None:
         with self.connect() as connection:

@@ -6,11 +6,16 @@ import json
 from pathlib import Path
 
 from boardforge.agent import JobAgent
+from boardforge.database import create_store
 from boardforge.agent_eval import run_deterministic_tool_eval, run_llm_tool_eval
 from boardforge.benchmark import run_benchmark
 from boardforge.comparison import comparison_markdown, run_comparison, run_embedding_comparison
 from boardforge.preference_eval import run_preference_eval
+from boardforge.resume_eval import run_resume_eval
+from boardforge.semantic import EmbeddingClient, warm_job_embeddings
+from boardforge.workers import sync_due_sources
 from boardforge.discovery.har import discover_from_har
+from boardforge.discovery import run_pending_discoveries
 from boardforge.discovery.manifest import ConnectorManifest
 from boardforge.connectors.manifest import fetch_manifest
 from boardforge.store import Store
@@ -67,6 +72,21 @@ def main() -> None:
     p_preference_eval = sub.add_parser("preference-eval")
     p_preference_eval.add_argument("--dataset", default=None)
 
+    p_resume_eval = sub.add_parser("resume-eval")
+    p_resume_eval.add_argument("--dataset", default=None)
+
+    p_discovery_worker = sub.add_parser("discovery-worker")
+    p_discovery_worker.add_argument("--limit", type=int, default=10)
+
+    p_embed_index = sub.add_parser("embed-index")
+    p_embed_index.add_argument("--batch-size", type=int, default=64)
+    p_embed_index.add_argument("--max-jobs", type=int, default=10000)
+
+    p_sync_sources = sub.add_parser("sync-sources")
+    p_sync_sources.add_argument("--interval-seconds", type=int, default=3600)
+    p_sync_sources.add_argument("--limit", type=int, default=25)
+    p_sync_sources.add_argument("--concurrency", type=int, default=4)
+
     args = parser.parse_args()
 
     if args.cmd == "benchmark":
@@ -107,7 +127,33 @@ def main() -> None:
         _print_json(out)
         return
 
-    store = Store()
+    if args.cmd == "resume-eval":
+        out = run_resume_eval(args.dataset) if args.dataset else run_resume_eval()
+        _print_json(out)
+        return
+
+    if args.cmd == "discovery-worker":
+        out = asyncio.run(run_pending_discoveries(create_store(), limit=args.limit))
+        _print_json(out)
+        return
+
+    if args.cmd == "embed-index":
+        out = asyncio.run(warm_job_embeddings(
+            create_store(), EmbeddingClient(),
+            batch_size=args.batch_size, max_jobs=args.max_jobs,
+        ))
+        _print_json(out)
+        return
+
+    if args.cmd == "sync-sources":
+        out = asyncio.run(sync_due_sources(
+            create_store(), interval_seconds=args.interval_seconds,
+            limit=args.limit, concurrency=args.concurrency,
+        ))
+        _print_json(out)
+        return
+
+    store = create_store()
     agent = JobAgent(store)
 
     if args.cmd == "sync":

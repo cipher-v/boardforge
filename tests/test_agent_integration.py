@@ -155,3 +155,51 @@ def test_resume_recommendations_respect_explicit_saved_role(tmp_path: Path):
     result = asyncio.run(agent.recommend_jobs("u", 15))
     assert [m["job"]["external_id"] for m in result.data["matches"]] == ["ai"]
     assert result.data["mode"] == "resume_recommendations"
+
+
+def test_inferred_resume_role_is_soft_until_candidate_confirms_it(tmp_path: Path):
+    agent, store = make_agent(tmp_path)
+    store.save_candidate_profile(
+        "u",
+        CandidateProfile(
+            skills=["Python", "FastAPI"], role_signals=["Backend"],
+            domains=["Backend / APIs"], reviewed=False,
+        ),
+    )
+    store.upsert_source_jobs("benchmark", "soft-role", [
+        Job(
+            source_kind="benchmark", source_key="soft-role", external_id="backend",
+            title="Backend Engineer", company="Demo", description="Python FastAPI",
+        ),
+        Job(
+            source_kind="benchmark", source_key="soft-role", external_id="support",
+            title="Technical Support Engineer", company="Demo", description="Customer support",
+        ),
+    ])
+    result = asyncio.run(agent.recommend_jobs("u", 10))
+    assert [m["job"]["external_id"] for m in result.data["matches"]] == [
+        "backend", "support",
+    ]
+
+
+def test_confirmed_target_role_becomes_explicit_constraint(tmp_path: Path):
+    agent, store = make_agent(tmp_path)
+    store.save_candidate_profile(
+        "u",
+        CandidateProfile(
+            skills=["Python", "FastAPI"], role_signals=["Backend"],
+            target_roles=["Backend"], reviewed=True,
+        ),
+    )
+    store.upsert_source_jobs("benchmark", "confirmed-role", [
+        Job(
+            source_kind="benchmark", source_key="confirmed-role", external_id="backend",
+            title="Backend Engineer", company="Demo", description="Python FastAPI",
+        ),
+        Job(
+            source_kind="benchmark", source_key="confirmed-role", external_id="support",
+            title="Technical Support Engineer", company="Demo", description="Customer support",
+        ),
+    ])
+    result = asyncio.run(agent.recommend_jobs("u", 10))
+    assert [m["job"]["external_id"] for m in result.data["matches"]] == ["backend"]

@@ -8,9 +8,9 @@ It is intentionally not another generic RAG demo or auto-apply bot.
 
 ## What it does
 
-- Accepts PDF/DOCX resumes, extracts a structured candidate profile, and uses it as soft ranking context
-- Produces automatic resume-based recommendations while keeping manual search and explicit preferences authoritative
-
+- Accepts PDF/DOCX/TXT resumes and extracts skills, roles, projects, experience and evidence snippets
+- Lets candidates review inferred skills and confirm target roles before those roles become hard constraints
+- Returns recommendations from the current index immediately, then refreshes after optional background source discovery
 - Detects public ATS providers from career URLs
 - Fetches live jobs from Greenhouse, Lever and Ashby
 - Falls back to JSON-LD JobPosting extraction for generic career pages
@@ -22,7 +22,7 @@ It is intentionally not another generic RAG demo or auto-apply bot.
 - Produces structured evidence-backed reasons and risk flags
 - Persists job embeddings by model and content hash so unchanged jobs are not re-embedded
 - Exposes sync, preference, search, feedback and agent APIs
-- Includes an executable starter benchmark, ranking/stability metrics and CI tests
+- Includes ranking, agent, preference and resume-extraction benchmarks plus CI tests
 - Optionally uses an OpenAI-compatible model for structured preference extraction
 
 ## Why this exists
@@ -41,7 +41,10 @@ BoardForge treats those as first-class engineering failures.
 ## Architecture
 
 ```text
-career URL
+resume ----------------> evidence-backed candidate profile
+                              |
+                              v
+career URL -----------> source discovery queue
    |
    v
 source detector
@@ -68,7 +71,7 @@ preferences + feedback    |
        structured evidence + risks
                   |
                   v
-             API / agent
+             API / tool-using agent
 ```
 
 See [docs/architecture.md](docs/architecture.md).
@@ -89,7 +92,68 @@ pytest -q
 uvicorn boardforge.api:app --reload
 ```
 
-Open `http://127.0.0.1:8000/docs`.
+Open `http://127.0.0.1:8000` for the local product demo or `/docs` for the API.
+
+### PostgreSQL + pgvector stack
+
+```bash
+docker compose up --build
+```
+
+This starts three services: the FastAPI application, a PostgreSQL 16 + pgvector
+database, and an independent discovery/source-refresh worker. Migrations are
+versioned under `boardforge/migrations` and applied when a PostgreSQL store starts.
+SQLite remains the zero-configuration test/local fallback when `DATABASE_URL` is unset.
+
+PostgreSQL uses a GIN full-text index for lexical candidate generation and an
+HNSW pgvector index for semantic candidates. Only a bounded candidate set reaches
+the evidence reranker; the application no longer needs to load the full job index.
+
+Populate or refresh missing job embeddings with:
+
+```bash
+python -m boardforge.cli embed-index --batch-size 64 --max-jobs 10000
+```
+
+The included browser UI is intentionally a single-user local demo. It stores the
+extracted profile, preferences and feedback in SQLite, never the raw resume, and
+provides a **Delete my data** action. Add real authentication and per-user
+authorization before exposing it as a public multi-user service.
+
+API deployments can enable profile isolation with a JSON token map and a separate
+admin token. Authentication is disabled when these variables are empty:
+
+```text
+BOARDFORGE_PROFILE_TOKENS={"candidate-secret-token":"candidate-profile-id"}
+BOARDFORGE_ADMIN_TOKEN=admin-secret-token
+```
+
+Protected requests use `Authorization: Bearer <token>`. For a consumer product,
+replace static tokens with an external OIDC provider while keeping the same
+profile-ownership boundary.
+
+## Optional background web discovery
+
+Search always returns from the current index first. With Brave discovery enabled,
+BoardForge queues a deduplicated discovery request, records source provenance,
+syncs newly found Greenhouse/Lever/Ashby boards after the response, and lets the UI
+poll for a refreshed result set.
+
+```text
+BOARDFORGE_ENABLE_WEB_DISCOVERY=1
+BOARDFORGE_BRAVE_API_KEY=...
+BOARDFORGE_DISCOVERY_TTL_SECONDS=900
+```
+
+The FastAPI demo executes queued work in-process. Request state is durable and a
+separate process can drain/recover pending work with:
+
+```bash
+python -m boardforge.cli discovery-worker --limit 10
+```
+
+A production deployment should run this worker independently with scheduling,
+retry policy and telemetry.
 
 ## Live-source CLI demo
 
@@ -184,7 +248,7 @@ This lets the system answer a more useful question than “what jobs exist?”:
 
 ## Evaluation
 
-Run `python -m boardforge.cli benchmark` for the 120-case adversarial ranking suite. Run `python -m boardforge.cli compare --markdown-out results/ranking.md` for lexical → constrained → evidence → feedback ablations, `python -m boardforge.cli agent-eval` for the 40-case production-fallback tool planner, and `python -m boardforge.cli preference-eval` for natural-language preference extraction. These datasets are synthetic regression/evaluation fixtures, not claims of real-user product quality.
+Run `python -m boardforge.cli benchmark` for the 120-case adversarial ranking suite. Run `python -m boardforge.cli compare --markdown-out results/ranking.md` for lexical → constrained → evidence → feedback ablations, `python -m boardforge.cli agent-eval` for the 40-case production-fallback tool planner, `python -m boardforge.cli preference-eval` for natural-language preference extraction, and `python -m boardforge.cli resume-eval` for resume profile extraction. These datasets are synthetic regression/evaluation fixtures, not claims of real-user product quality.
 
 See [docs/evaluation.md](docs/evaluation.md).
 
@@ -203,14 +267,14 @@ Planned production milestones:
 
 1. persistent hybrid full-text/vector retrieval
 2. real-user labels to complement the packaged 120-case ranking and 40-case agent-tool benchmarks
-3. scheduled source synchronization and operational telemetry
+3. an external discovery/sync worker with retries and operational telemetry
 4. automatic validation of learned manifests against browser-visible counts
 
 The project explicitly excludes authentication bypass and protected/private API access.
 
 ## Interview story
 
-> I wanted to build job-search infrastructure rather than another matching demo. BoardForge ingests live ATS data, records lifecycle events, refuses unsafe mass-closure syncs, remembers candidate constraints, and returns structured evidence for every match. HAR-assisted discovery produces reusable declarative connectors without executing generated code. A reproducible benchmark makes ranking changes measurable rather than anecdotal.
+> I wanted to build a career agent on top of reliable job-search infrastructure rather than hide retrieval behind an LLM. BoardForge turns a resume into editable evidence, keeps inferred roles soft until the candidate confirms them, returns indexed results immediately, and discovers new ATS sources in the background. Deterministic constraints, temporal job state, feedback memory and versioned evals keep the agent measurable rather than anecdotal.
 
 
 ## Learn an unknown public career site from a browser HAR

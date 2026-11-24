@@ -2,27 +2,37 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, HttpUrl
 
 from boardforge.agent import JobAgent
-from boardforge.discovery import discover_and_sync
-from boardforge.models import CandidateProfile, FeedbackRequest, PreferenceUpdate, SearchRequest
+from boardforge.auth import authorize_admin, authorize_any_profile, authorize_profile
+from boardforge.connectors.detect import detect_source
+from boardforge.database import create_store
+from boardforge.discovery import queue_discovery, run_discovery_request
+from boardforge.models import (
+    CandidateProfile,
+    CandidateProfileUpdate,
+    FeedbackRequest,
+    PreferenceUpdate,
+    SearchRequest,
+)
+from boardforge.observability import metrics_response, request_observability
 from boardforge.resume import extract_candidate_profile, extract_resume_text
-from boardforge.store import Store
 from boardforge.sync import sync_url
 from boardforge.tool_agent import ToolCallingAgent
 
 
 app = FastAPI(
     title="BoardForge",
-    version="0.5.0",
+    version="0.6.0",
     description="Job intelligence infrastructure: ingest, track, personalize, rank and evaluate.",
 )
-store = Store()
+store = create_store()
 core_agent = JobAgent(store)
 tool_agent = ToolCallingAgent(core_agent)
+app.middleware("http")(request_observability)
 
 
 class SyncRequest(BaseModel):
@@ -39,13 +49,67 @@ def ui():
 
 @app.get("/health")
 def health():
-    return {"status":"ok","version":"0.5.0"}
+    return {"status":"ok","version":"0.6.0","deployment_mode":"local-demo"}
+
+
+@app.get("/ready")
+def ready():
+    if not store.ping():
+        raise HTTPException(status_code=503, detail="database unavailable")
+    return {"status": "ready", "store": type(store).__name__}
+
+
+@app.get("/metrics", include_in_schema=False)
+def metrics():
+    return metrics_response()
+
+
+def _schedule_discovery(
+    background_tasks: BackgroundTasks,
+    profile_id: str,
+    profile: CandidateProfile,
+    query: str = "",
+) -> dict:
+    preferences = store.load_preferences(profile_id)
+    queued = queue_discovery(
+        store, profile_id, profile, preferences, query=query,
+    )
+    if queued["status"] == "queued" and not queued["cached"]:
+        background_tasks.add_task(
+            run_discovery_request,
+            store,
+            queued["request_id"],
+            profile,
+            preferences,
+            query=query,
+        )
+    return queued
+
+
+async def _read_limited_body(request: Request, max_bytes: int) -> bytes:
+    content_length = request.headers.get("content-length")
+    if content_length and int(content_length) > max_bytes:
+        raise HTTPException(status_code=413, detail="resume must be 5 MB or smaller")
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > max_bytes:
+            raise HTTPException(status_code=413, detail="resume must be 5 MB or smaller")
+    return bytes(body)
 
 
 @app.post("/sync")
-async def sync(req: SyncRequest):
+async def sync(req: SyncRequest, request: Request):
+    authorize_admin(request)
     try:
-        return (await sync_url(str(req.url), store)).model_dump()
+        url = str(req.url)
+        summary = await sync_url(url, store)
+        source = detect_source(url)
+        store.record_discovered_source(
+            source.kind, source.key, source.board_url, "manual-source",
+            synced=True, status="synced",
+        )
+        return summary.model_dump()
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -53,14 +117,14 @@ async def sync(req: SyncRequest):
 @app.post("/resume")
 async def upload_resume(
     request: Request,
+    background_tasks: BackgroundTasks,
     profile_id: str = "default",
     filename: str = "resume.pdf",
 ):
-    data = await request.body()
+    authorize_profile(request, profile_id)
+    data = await _read_limited_body(request, 5 * 1024 * 1024)
     if not data:
         raise HTTPException(status_code=400, detail="resume file is empty")
-    if len(data) > 5 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="resume must be 5 MB or smaller")
     try:
         text = extract_resume_text(filename, data)
         profile = extract_candidate_profile(text, filename=filename)
@@ -69,62 +133,106 @@ async def upload_resume(
     if not profile.skills and not profile.role_signals and not profile.education:
         raise HTTPException(status_code=400, detail="could not extract a useful profile from this resume")
     store.save_candidate_profile(profile_id, profile)
-    discovery = await discover_and_sync(
-        store,
-        profile,
-        store.load_preferences(profile_id),
-    )
     recommendations = await core_agent.recommend_jobs(profile_id, 15)
     return {
         "profile": profile.model_dump(),
-        "discovery": discovery.as_dict(),
+        "discovery": _schedule_discovery(background_tasks, profile_id, profile),
         **recommendations.data,
     }
 
 
 @app.get("/candidate-profile/{profile_id}")
-def candidate_profile(profile_id: str):
+def candidate_profile(profile_id: str, request: Request):
+    authorize_profile(request, profile_id)
     profile = store.load_candidate_profile(profile_id)
     return {"profile": profile.model_dump() if profile else None}
 
 
+@app.put("/candidate-profile/{profile_id}")
+def update_candidate_profile(profile_id: str, req: CandidateProfileUpdate, request: Request):
+    authorize_profile(request, profile_id)
+    profile = store.load_candidate_profile(profile_id)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="candidate profile not found")
+    updates = req.model_dump(exclude_none=True)
+    for field in ("skills", "target_roles", "domains"):
+        if field in updates:
+            updates[field] = list(dict.fromkeys(
+                value.strip()[:80]
+                for value in updates[field]
+                if value.strip()
+            ))[:30]
+    profile = profile.model_copy(update=updates)
+    store.save_candidate_profile(profile_id, profile)
+    return {"profile": profile.model_dump()}
+
+
+@app.delete("/candidate-profile/{profile_id}")
+def delete_candidate_profile(profile_id: str, request: Request):
+    authorize_profile(request, profile_id)
+    store.delete_profile(profile_id)
+    return {"deleted": True, "profile_id": profile_id}
+
+
 @app.get("/recommendations/{profile_id}")
-async def recommendations(profile_id: str, top_k: int = 15):
+async def recommendations(profile_id: str, request: Request, top_k: int = 15):
+    authorize_profile(request, profile_id)
     result = await core_agent.recommend_jobs(profile_id, max(1, min(top_k, 50)))
     return result.data
 
 
 @app.post("/discover/{profile_id}")
-async def discover(profile_id: str, req: SearchRequest):
+async def discover(
+    profile_id: str,
+    req: SearchRequest,
+    background_tasks: BackgroundTasks,
+    request: Request,
+):
+    # req.profile_id is ignored here; ownership follows the path parameter.
+    authorize_profile(request, profile_id)
     profile = store.load_candidate_profile(profile_id) or CandidateProfile()
-    report = await discover_and_sync(
-        store,
-        profile,
-        store.load_preferences(profile_id),
-        query=req.query,
-    )
     result = await core_agent.search_jobs(profile_id, req.query, req.top_k)
-    return {"discovery": report.as_dict(), **result.data}
+    queued = _schedule_discovery(background_tasks, profile_id, profile, req.query)
+    return {"discovery": queued, **result.data}
+
+
+@app.get("/discovery/{request_id}")
+def discovery_status(request_id: int, request: Request):
+    authorize_any_profile(request)
+    request = store.discovery_request(request_id)
+    if request is None:
+        raise HTTPException(status_code=404, detail="discovery request not found")
+    return request
+
+
+@app.get("/sources")
+def sources(request: Request):
+    authorize_admin(request)
+    return {"sources": store.discovered_sources()}
 
 
 @app.post("/preferences")
-async def preferences(req: PreferenceUpdate):
+async def preferences(req: PreferenceUpdate, request: Request):
+    authorize_profile(request, req.profile_id)
     result = await core_agent.update_preferences(req.profile_id, req.text)
     return {"message":result.message,"preferences":result.data}
 
 
 @app.post("/search")
-async def search(req: SearchRequest):
+async def search(req: SearchRequest, request: Request):
+    authorize_profile(request, req.profile_id)
     result = await core_agent.search_jobs(req.profile_id, req.query, req.top_k)
     return result.data
 
 
 @app.post("/feedback")
-async def feedback(req: FeedbackRequest):
+async def feedback(req: FeedbackRequest, request: Request):
+    authorize_profile(request, req.profile_id)
     result = await core_agent.record_feedback(req)
     return {"message":result.message,**result.data}
 
 
 @app.post("/agent")
-async def agent_turn(req: SearchRequest):
+async def agent_turn(req: SearchRequest, request: Request):
+    authorize_profile(request, req.profile_id)
     return await tool_agent.run(req.profile_id, req.query)

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import asyncio
+import hashlib
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
@@ -8,7 +10,7 @@ import httpx
 
 from boardforge.connectors.detect import detect_source
 from boardforge.models import CandidateProfile, Preferences, SourceRef
-from boardforge.store import Store
+from boardforge.database import StoreProtocol
 from boardforge.sync import sync_url
 
 
@@ -137,7 +139,7 @@ def canonical_sources(urls: list[str]) -> list[SourceRef]:
 
 
 async def discover_and_sync(
-    store: Store,
+    store: StoreProtocol,
     profile: CandidateProfile,
     prefs: Preferences,
     *,
@@ -156,21 +158,47 @@ async def discover_and_sync(
     queries = build_discovery_queries(profile, prefs, query)
     report = DiscoveryReport(enabled=True, searched_queries=len(queries))
 
-    for search_query in queries:
-        try:
-            urls.extend(await client.search_urls(search_query, count=20))
-        except Exception:
+    search_results = await asyncio.gather(
+        *(client.search_urls(search_query, count=20) for search_query in queries),
+        return_exceptions=True,
+    )
+    for result in search_results:
+        if isinstance(result, Exception):
             report.failures += 1
+        else:
+            urls.extend(result)
 
     sources = canonical_sources(urls)[:max_boards]
     report.discovered_boards = len(sources)
+    provenance = (
+        "manual:" + hashlib.sha256(" ".join(query.casefold().split()).encode("utf-8")).hexdigest()[:12]
+        if query else "profile-derived"
+    )
 
     for source in sources:
+        store.record_discovered_source(
+            source.kind, source.key, source.board_url, provenance
+        )
         try:
             summary = await sync_url(source.board_url, store)
             report.synced_boards += 1
             report.jobs_fetched += summary.fetched
+            store.record_discovered_source(
+                source.kind,
+                source.key,
+                source.board_url,
+                provenance,
+                synced=True,
+                status="synced",
+            )
         except Exception:
             report.failures += 1
+            store.record_discovered_source(
+                source.kind,
+                source.key,
+                source.board_url,
+                provenance,
+                status="failed",
+            )
 
     return report

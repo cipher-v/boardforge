@@ -1,0 +1,48 @@
+services:
+  api:
+    build: .
+    environment:
+      DATABASE_URL: postgresql://boardforge:boardforge@postgres:5432/boardforge
+      BOARDFORGE_ENABLE_WEB_DISCOVERY: ${BOARDFORGE_ENABLE_WEB_DISCOVERY:-0}
+      BOARDFORGE_BRAVE_API_KEY: ${BOARDFORGE_BRAVE_API_KEY:-}
+      BOARDFORGE_ENABLE_EMBEDDINGS: ${BOARDFORGE_ENABLE_EMBEDDINGS:-0}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    build: .
+    command: ["python", "-m", "boardforge.worker"]
+    environment:
+      DATABASE_URL: postgresql://boardforge:boardforge@postgres:5432/boardforge
+      BOARDFORGE_ENABLE_WEB_DISCOVERY: ${BOARDFORGE_ENABLE_WEB_DISCOVERY:-0}
+      BOARDFORGE_BRAVE_API_KEY: ${BOARDFORGE_BRAVE_API_KEY:-}
+      BOARDFORGE_WORKER_POLL_SECONDS: ${BOARDFORGE_WORKER_POLL_SECONDS:-30}
+      BOARDFORGE_SOURCE_SYNC_SECONDS: ${BOARDFORGE_SOURCE_SYNC_SECONDS:-3600}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: boardforge
+      POSTGRES_USER: boardforge
+      POSTGRES_PASSWORD: boardforge
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U boardforge -d boardforge"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - boardforge_pgdata:/var/lib/postgresql/data
+
+volumes:
+  boardforge_pgdata:

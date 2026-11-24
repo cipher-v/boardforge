@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from boardforge.models import FeedbackRequest
+from boardforge.database import StoreProtocol
 from boardforge.planning import plan_tools
 from boardforge.preferences import LLMPreferenceExtractor, effective_search_preferences
 from boardforge.resume import apply_candidate_context
-from boardforge.semantic import EmbeddingClient, hybrid_rank_jobs
-from boardforge.store import Store
+from boardforge.semantic import EmbeddingClient, retrieve_and_rank_jobs
 
 
 @dataclass
@@ -20,7 +20,7 @@ class JobAgent:
 
     def __init__(
         self,
-        store: Store,
+        store: StoreProtocol,
         extractor: LLMPreferenceExtractor | None = None,
         embeddings: EmbeddingClient | None = None,
     ):
@@ -40,20 +40,22 @@ class JobAgent:
         candidate_profile = self.store.load_candidate_profile(profile_id)
         if candidate_profile:
             prefs = apply_candidate_context(prefs, candidate_profile)
-        matches = await hybrid_rank_jobs(
-            self.store.active_jobs(),
+        candidate_limit = max(100, min(1000, top_k * 25))
+        matches, retrieval = await retrieve_and_rank_jobs(
+            self.store,
             prefs,
             query=query,
             top_k=top_k,
             rejected_ids=self.store.rejected_job_ids(profile_id),
             client=self.embeddings,
-            store=self.store,
+            candidate_limit=candidate_limit,
         )
         return AgentResult(
             f"Found {len(matches)} ranked jobs.",
             {
                 "matches":[m.model_dump(mode="json") for m in matches],
                 "profile_used": candidate_profile is not None,
+                "retrieval": retrieval,
             },
         )
 
@@ -65,18 +67,21 @@ class JobAgent:
             return await self.search_jobs(profile_id, "", top_k)
 
         prefs = saved.model_copy(deep=True)
-        if not prefs.roles:
-            prefs.roles = candidate_profile.role_signals[:4]
+        # Only roles explicitly confirmed in the profile become hard title
+        # constraints. Resume-inferred roles remain soft evidence.
+        if not prefs.roles and candidate_profile.target_roles:
+            prefs.roles = candidate_profile.target_roles[:4]
         prefs = apply_candidate_context(prefs, candidate_profile)
 
-        matches = await hybrid_rank_jobs(
-            self.store.active_jobs(),
+        candidate_limit = max(100, min(1000, top_k * 25))
+        matches, retrieval = await retrieve_and_rank_jobs(
+            self.store,
             prefs,
             query="",
             top_k=top_k,
             rejected_ids=self.store.rejected_job_ids(profile_id),
             client=self.embeddings,
-            store=self.store,
+            candidate_limit=candidate_limit,
         )
         return AgentResult(
             f"Found {len(matches)} resume-based recommendations.",
@@ -84,6 +89,7 @@ class JobAgent:
                 "matches": [m.model_dump(mode="json") for m in matches],
                 "profile_used": True,
                 "mode": "resume_recommendations",
+                "retrieval": retrieval,
             },
         )
 

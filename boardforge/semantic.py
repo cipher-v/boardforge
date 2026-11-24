@@ -5,9 +5,9 @@ import os
 import hashlib
 import httpx
 
-from boardforge.matching import job_text, rank_jobs
+from boardforge.matching import job_text, query_text, rank_jobs
 from boardforge.models import Job, Match, Preferences
-from boardforge.store import Store
+from boardforge.database import StoreProtocol
 
 
 def cosine(a: list[float], b: list[float]) -> float:
@@ -48,14 +48,18 @@ async def hybrid_rank_jobs(
     top_k: int,
     rejected_ids: set[str],
     client: EmbeddingClient,
-    store: Store | None = None,
+    store: StoreProtocol | None = None,
+    query_vector: list[float] | None = None,
 ) -> list[Match]:
     baseline = rank_jobs(jobs, prefs, query=query, top_k=len(jobs), rejected_ids=rejected_ids)
     if not baseline or not client.enabled:
         return baseline[:top_k]
 
-    qtext = " ".join(prefs.roles + prefs.locations + prefs.prefer_terms + [query])
-    qv = (await client.embed([qtext]))[0]
+    qtext = query_text(prefs, query)
+    try:
+        qv = query_vector or (await client.embed([qtext]))[0]
+    except Exception:
+        return baseline[:top_k]
     documents = [job_text(match.job)[:6000] for match in baseline]
     vectors: list[list[float] | None] = [None] * len(documents)
     missing_indexes: list[int] = []
@@ -69,7 +73,10 @@ async def hybrid_rank_jobs(
             vectors[index] = cached
 
     if missing_indexes:
-        embedded = await client.embed([documents[index] for index in missing_indexes])
+        try:
+            embedded = await client.embed([documents[index] for index in missing_indexes])
+        except Exception:
+            return baseline[:top_k]
         if len(embedded) != len(missing_indexes):
             raise RuntimeError("embedding provider returned an unexpected vector count")
         for index, vector in zip(missing_indexes, embedded):
@@ -101,3 +108,75 @@ async def hybrid_rank_jobs(
         )
     )
     return rescored[:top_k]
+
+
+async def retrieve_and_rank_jobs(
+    store: StoreProtocol,
+    prefs: Preferences,
+    *,
+    query: str,
+    top_k: int,
+    rejected_ids: set[str],
+    client: EmbeddingClient,
+    candidate_limit: int,
+) -> tuple[list[Match], dict]:
+    retrieval_query = query_text(prefs, query).strip()
+    query_vector: list[float] | None = None
+    semantic_retrieval = False
+    if client.enabled and retrieval_query:
+        try:
+            query_vector = (await client.embed([retrieval_query]))[0]
+            semantic_retrieval = True
+        except Exception:
+            query_vector = None
+
+    jobs = store.candidate_jobs(
+        retrieval_query,
+        limit=candidate_limit,
+        query_vector=query_vector,
+        embedding_model=client.model if query_vector is not None else "",
+    )
+    matches = await hybrid_rank_jobs(
+        jobs,
+        prefs,
+        query=query,
+        top_k=top_k,
+        rejected_ids=rejected_ids,
+        client=client,
+        store=store,
+        query_vector=query_vector,
+    )
+    return matches, {
+        "store": type(store).__name__,
+        "candidate_count": len(jobs),
+        "candidate_limit": candidate_limit,
+        "semantic_retrieval": semantic_retrieval,
+    }
+
+
+async def warm_job_embeddings(
+    store: StoreProtocol,
+    client: EmbeddingClient,
+    *,
+    batch_size: int = 64,
+    max_jobs: int = 10_000,
+) -> dict:
+    if not client.enabled:
+        raise RuntimeError("embeddings are disabled; configure OPENAI_API_KEY and BOARDFORGE_ENABLE_EMBEDDINGS=1")
+    processed = 0
+    while processed < max_jobs:
+        jobs = store.embedding_candidates(
+            client.model,
+            limit=min(batch_size, max_jobs - processed),
+        )
+        if not jobs:
+            break
+        documents = [job_text(job)[:6000] for job in jobs]
+        vectors = await client.embed(documents)
+        if len(vectors) != len(jobs):
+            raise RuntimeError("embedding provider returned an unexpected vector count")
+        for job, document, vector in zip(jobs, documents, vectors):
+            content_hash = hashlib.sha256(document.encode("utf-8")).hexdigest()
+            store.save_embedding(job.stable_id, client.model, content_hash, vector)
+        processed += len(jobs)
+    return {"processed": processed, "model": client.model}
