@@ -158,3 +158,69 @@ def test_generic_country_overlap_does_not_create_confident_relevance():
         "semantic-only relevance; no concrete query or role evidence"
         in matches[0].risks
     )
+
+
+
+def test_specific_intent_requires_more_than_role_evidence():
+    client = FakeEmbeddings()
+    generic_ml = Job(
+        source_kind="benchmark",
+        source_key="cache",
+        external_id="generic-ml",
+        title="Machine Learning Engineer",
+        company="Demo",
+        country="India",
+        description="Build recommendation models and Python ML services.",
+    )
+    anti_fraud = Job(
+        source_kind="benchmark",
+        source_key="cache",
+        external_id="anti-fraud",
+        title="Software Engineer",
+        company="Demo",
+        country="India",
+        description=(
+            "Design and deploy machine learning systems for anti-fraud, "
+            "anti-abuse, and distributed services."
+        ),
+    )
+
+    matches = asyncio.run(hybrid_rank_jobs(
+        [generic_ml, anti_fraud],
+        Preferences(roles=["AI/ML"], countries=["India"]),
+        query="machine learning anti-fraud anti-abuse distributed systems India",
+        top_k=10,
+        rejected_ids=set(),
+        client=client,
+        store=None,
+    ))
+
+    by_id = {match.job.external_id: match for match in matches}
+    assert by_id["anti-fraud"].status == "recommended"
+    assert by_id["generic-ml"].status == "needs_verification"
+    assert "query-specific relevance not verified" in by_id["generic-ml"].risks
+
+
+def test_general_role_query_still_accepts_role_evidence():
+    client = FakeEmbeddings()
+    generic_ml = Job(
+        source_kind="benchmark",
+        source_key="cache",
+        external_id="generic-ml",
+        title="Machine Learning Engineer",
+        company="Demo",
+        country="India",
+        description="Build recommendation models and Python ML services.",
+    )
+
+    matches = asyncio.run(hybrid_rank_jobs(
+        [generic_ml],
+        Preferences(roles=["AI/ML"], countries=["India"]),
+        query="machine learning engineer India",
+        top_k=10,
+        rejected_ids=set(),
+        client=client,
+        store=None,
+    ))
+
+    assert matches[0].status == "recommended"
