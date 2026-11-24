@@ -8,6 +8,7 @@ from boardforge.store import Store
 
 class EnabledClient:
     enabled = True
+    name = "test"
 
     async def search_urls(self, query: str, *, count: int = 20) -> list[str]:
         if "greenhouse" in query:
