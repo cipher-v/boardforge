@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import sqlite3
 from contextlib import contextmanager
@@ -66,6 +67,42 @@ CREATE TABLE IF NOT EXISTS job_embeddings (
   updated_at TEXT NOT NULL,
   PRIMARY KEY(stable_id, model)
 );
+
+CREATE TABLE IF NOT EXISTS query_embeddings (
+  cache_key TEXT PRIMARY KEY,
+  normalized_query TEXT NOT NULL,
+  model TEXT NOT NULL,
+  config_hash TEXT NOT NULL,
+  vector TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  last_used_at TEXT NOT NULL,
+  hit_count INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS relevance_verifications (
+  cache_key TEXT PRIMARY KEY,
+  judgment TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS llm_usage_reservations (
+  reservation_id TEXT PRIMARY KEY,
+  provider TEXT NOT NULL,
+  model TEXT NOT NULL,
+  reserved_tokens INTEGER NOT NULL,
+  input_tokens INTEGER NOT NULL DEFAULT 0,
+  output_tokens INTEGER NOT NULL DEFAULT 0,
+  thinking_tokens INTEGER NOT NULL DEFAULT 0,
+  total_tokens INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL,
+  reserved_cost_usd REAL NOT NULL DEFAULT 0,
+  estimated_cost_usd REAL NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  completed_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_llm_usage_provider_model_created
+  ON llm_usage_reservations(provider, model, created_at);
 
 CREATE TABLE IF NOT EXISTS profiles (
   profile_id TEXT PRIMARY KEY,
@@ -158,6 +195,15 @@ class Store:
                 column = statement.split("ADD COLUMN ", 1)[1].split()[0]
                 if column not in discovery_columns:
                     connection.execute(statement)
+            usage_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(llm_usage_reservations)")
+            }
+            if "reserved_cost_usd" not in usage_columns:
+                connection.execute(
+                    "ALTER TABLE llm_usage_reservations ADD COLUMN "
+                    "reserved_cost_usd REAL NOT NULL DEFAULT 0"
+                )
 
     @contextmanager
     def connect(self):
@@ -399,6 +445,124 @@ class Store:
                 (stable_id, model, content_hash, json.dumps(vector), _utcnow()),
             )
 
+    def load_query_embedding(self, cache_key: str) -> list[float] | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT vector FROM query_embeddings WHERE cache_key=?", (cache_key,)
+            ).fetchone()
+            if row is not None:
+                connection.execute(
+                    """UPDATE query_embeddings SET last_used_at=?,hit_count=hit_count+1
+                       WHERE cache_key=?""",
+                    (_utcnow(), cache_key),
+                )
+        return [float(value) for value in json.loads(row["vector"])] if row else None
+
+    def save_query_embedding(
+        self, cache_key: str, normalized_query: str, model: str,
+        config_hash: str, vector: list[float],
+    ) -> None:
+        now = _utcnow()
+        with self.connect() as connection:
+            connection.execute(
+                """INSERT INTO query_embeddings
+                   (cache_key,normalized_query,model,config_hash,vector,created_at,last_used_at)
+                   VALUES(?,?,?,?,?,?,?)
+                   ON CONFLICT(cache_key) DO UPDATE SET vector=excluded.vector,
+                   last_used_at=excluded.last_used_at""",
+                (cache_key, normalized_query, model, config_hash,
+                 json.dumps(vector), now, now),
+            )
+
+    def load_relevance_verification(self, cache_key: str) -> dict | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT judgment FROM relevance_verifications WHERE cache_key=?",
+                (cache_key,),
+            ).fetchone()
+        return json.loads(row["judgment"]) if row else None
+
+    def save_relevance_verification(self, cache_key: str, judgment: dict) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """INSERT INTO relevance_verifications(cache_key,judgment,created_at)
+                   VALUES(?,?,?) ON CONFLICT(cache_key) DO UPDATE SET
+                   judgment=excluded.judgment,created_at=excluded.created_at""",
+                (cache_key, json.dumps(judgment), _utcnow()),
+            )
+
+    def reserve_llm_usage(
+        self, provider: str, model: str, reservation_id: str,
+        reserved_tokens: int, *, tpm_limit: int, tpd_limit: int,
+        reserved_cost_usd: float = 0.0,
+        cumulative_cost_limit_usd: float = 1000000.0,
+    ) -> dict:
+        """Atomically reserve quota before a paid call across local processes."""
+        now = datetime.now(timezone.utc)
+        minute_start = (now - timedelta(seconds=60)).isoformat()
+        day_start = (now - timedelta(hours=24)).isoformat()
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            rows = connection.execute(
+                """SELECT reserved_tokens,total_tokens,status,created_at,
+                          reserved_cost_usd,estimated_cost_usd
+                   FROM llm_usage_reservations
+                   WHERE provider=? AND model=? AND created_at>=?""",
+                (provider, model, day_start),
+            ).fetchall()
+            effective = lambda row: (
+                row["total_tokens"] if row["status"] == "completed"
+                else row["reserved_tokens"]
+            )
+            daily = sum(effective(row) for row in rows)
+            cost_rows = connection.execute(
+                """SELECT status,reserved_cost_usd,estimated_cost_usd
+                   FROM llm_usage_reservations"""
+            ).fetchall()
+            cumulative_cost = sum(
+                row["estimated_cost_usd"] if row["status"] == "completed"
+                else row["reserved_cost_usd"] for row in cost_rows
+            )
+            minute_rows = [row for row in rows if row["created_at"] >= minute_start]
+            minute = sum(effective(row) for row in minute_rows)
+            if daily + reserved_tokens > tpd_limit:
+                return {"allowed": False, "reason": "daily_token_limit",
+                        "used_tokens": daily, "retry_after_seconds": 86400}
+            if cumulative_cost + reserved_cost_usd > cumulative_cost_limit_usd:
+                return {"allowed": False, "reason": "cumulative_cost_limit",
+                        "used_tokens": daily, "used_cost_usd": cumulative_cost,
+                        "retry_after_seconds": 86400}
+            if minute + reserved_tokens > tpm_limit:
+                retry_after = 60
+                if minute_rows:
+                    oldest = min(datetime.fromisoformat(row["created_at"]) for row in minute_rows)
+                    retry_after = max(1, math.ceil(60 - (now - oldest).total_seconds()))
+                return {"allowed": False, "reason": "minute_token_limit",
+                        "used_tokens": minute, "retry_after_seconds": retry_after}
+            connection.execute(
+                """INSERT INTO llm_usage_reservations(
+                     reservation_id,provider,model,reserved_tokens,reserved_cost_usd,
+                     status,created_at) VALUES(?,?,?,?,?,?,?)""",
+                (reservation_id, provider, model, reserved_tokens, reserved_cost_usd,
+                 "reserved", now.isoformat()),
+            )
+        return {"allowed": True, "used_tokens": minute, "daily_tokens": daily,
+                "cumulative_cost_usd": cumulative_cost}
+
+    def finalize_llm_usage(
+        self, reservation_id: str, *, status: str, input_tokens: int = 0,
+        output_tokens: int = 0, thinking_tokens: int = 0, total_tokens: int = 0,
+        estimated_cost_usd: float = 0.0,
+    ) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """UPDATE llm_usage_reservations SET status=?,input_tokens=?,
+                     output_tokens=?,thinking_tokens=?,total_tokens=?,
+                     estimated_cost_usd=?,completed_at=? WHERE reservation_id=?""",
+                (status, input_tokens, output_tokens, thinking_tokens, total_tokens,
+                 estimated_cost_usd, _utcnow(), reservation_id),
+            )
+
     def embedding_status(self, model: str) -> dict:
         with self.connect() as connection:
             rows = connection.execute(
@@ -635,6 +799,21 @@ class Store:
                 ),
             )
 
+    def usage_cost_summary(self) -> dict:
+        with self.connect() as connection:
+            row = connection.execute(
+                """SELECT COUNT(*) AS reservations,
+                          COALESCE(SUM(CASE WHEN status='completed'
+                            THEN estimated_cost_usd ELSE reserved_cost_usd END),0) AS cost,
+                          COALESCE(SUM(total_tokens),0) AS tokens
+                   FROM llm_usage_reservations"""
+            ).fetchone()
+        return {
+            "reservations": int(row["reservations"]),
+            "estimated_cost_usd": float(row["cost"]),
+            "total_tokens": int(row["tokens"]),
+        }
+
     def discovered_sources(self) -> list[dict]:
         with self.connect() as connection:
             rows = connection.execute(
@@ -672,3 +851,12 @@ class Store:
                 (profile_id,),
             ).fetchall()
         return {row["job_id"] for row in rows}
+
+    def feedback_history(self, profile_id: str, *, limit: int = 20) -> list[dict]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """SELECT job_id,verdict,note,created_at FROM feedback
+                   WHERE profile_id=? ORDER BY id DESC LIMIT ?""",
+                (profile_id, max(1, min(limit, 100))),
+            ).fetchall()
+        return [dict(row) for row in rows]

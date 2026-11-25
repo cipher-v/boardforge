@@ -55,9 +55,56 @@ A job index is not a static dataset. Roles appear, change, get reposted and clos
 
 LLM use is optional and narrow:
 - structured preference extraction
-- later: reranking and explanation generation
+- bidirectional relevance verification over a bounded, eligible candidate pool
+
+The optional relevance verifier runs after retrieval, deterministic hard
+constraints, rejection memory, and confidence enforcement but before final
+top-K selection. It receives eligible `recommended` and `needs_verification`
+candidates from a bounded pool. A supported direct judgment can promote a
+relevance-uncertain row; adjacent becomes a separately identified alternative;
+irrelevant is omitted; uncertain, malformed, missing, timed-out, or unsupported
+remains `needs_verification`. It cannot restore a rejected job, reopen a
+confirmed closed vacancy, resolve unknown eligibility, or waive a constraint.
+Job descriptions are untrusted JSON data, never prompt instructions.
+
+Judgments are cached by job-content hash, normalized intent, canonical
+preferences, provider model, and prompt version. The provider boundary is a
+small structured-batch protocol over a reusable generation interface supporting
+schemas and future tool declarations. The primary adapter uses the official
+Google Gen AI SDK in Vertex mode with ADC; the OpenAI-compatible/Groq adapter
+remains available, while tests inject mock providers.
 
 Core ingestion, state tracking, constraint enforcement and evaluation remain deterministic and testable.
+
+## Intelligent agent boundary
+
+The optional intelligent agent extends `JobAgent`; it does not replace retrieval,
+ranking, relevance verification, or persistent state. Gemini through Vertex is
+the primary reasoning provider. Groq with `openai/gpt-oss-120b` remains an
+explicitly selected alternative, with no automatic provider switching.
+
+The reasoning model can request only typed BoardForge tools:
+
+- read profile, preferences, and previous feedback;
+- search the existing index;
+- queue targeted discovery after an insufficient indexed search;
+- synchronize an exact source already present in the trusted-source registry;
+- persist an explicitly authorized preference change; and
+- record or read job feedback.
+
+The executor, not the model, authorizes each action. Preference writes require
+an exact quote from the current user turn. Discovery is rejected before indexed
+search and after sufficient verified results. Source sync cannot accept an
+arbitrary URL. Exact duplicate calls are rejected. Job descriptions and all tool
+results remain marked as untrusted data. The model has no code-execution,
+credential, job-creation, or job-application capability.
+
+Each turn has independent iteration, tool-call, token, time, and cumulative-cost
+limits. Reservations enter the same persistent atomic usage ledger as relevance,
+embedding, and discovery calls, including retry capacity. The final user-facing
+job summary is rendered from bounded tool output rather than unverified model
+prose. If agent reasoning is disabled or unavailable, the existing deterministic
+planner remains the fallback.
 
 ## Connector discovery safety
 
@@ -76,4 +123,4 @@ Learned manifests are declarative and limited to public GET endpoints. Private/l
 - persistent full-text and vector indexes
 - pgvector candidate retrieval over the existing content-hash-keyed embedding cache
 - an external queued worker, retries and operational metrics
-- larger ranking and tool-use evaluation datasets
+- consented real-user agent traces and human-reviewed tool-use evaluation

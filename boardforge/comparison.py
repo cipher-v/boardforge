@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from boardforge.evals import ndcg_at_k, precision_among_returned, precision_at_k, recall_at_k
+from boardforge.database import create_store
 from boardforge.matching import hard_violations, lexical_score, rank_jobs, role_evidence
 from boardforge.models import Job, Match, Preferences
 from boardforge.semantic import EmbeddingClient, hybrid_rank_jobs
@@ -152,7 +153,7 @@ async def run_embedding_comparison(
     path: str | Path = DEFAULT_PATH,
     top_k: int = 5,
 ) -> dict[str, Any]:
-    client = EmbeddingClient()
+    client = EmbeddingClient(budget_store=create_store())
     if not client.enabled:
         return {
             "status": "skipped",

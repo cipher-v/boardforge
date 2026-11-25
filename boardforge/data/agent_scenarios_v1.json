@@ -1,0 +1,18 @@
+{
+  "version": "1.0",
+  "provider": "mocked",
+  "scenarios": [
+    {"name": "straightforward_search", "required_tools": ["search_indexed_jobs"], "forbidden_tools": ["discover_job_sources"]},
+    {"name": "complex_conditional_preferences", "required_tools": ["search_indexed_jobs"]},
+    {"name": "explicit_preference_change", "required_tools": ["update_preferences", "search_indexed_jobs"]},
+    {"name": "insufficient_index", "required_tools": ["search_indexed_jobs"]},
+    {"name": "discovery_decision", "required_tools": ["search_indexed_jobs", "discover_job_sources"]},
+    {"name": "negative_feedback", "required_tools": ["record_job_feedback"]},
+    {"name": "contradictory_constraints", "required_tools": ["search_indexed_jobs"], "forbidden_tools": ["update_preferences"]},
+    {"name": "no_suitable_jobs", "required_tools": ["search_indexed_jobs"]},
+    {"name": "provider_failure", "required_tools": []},
+    {"name": "budget_exhaustion", "required_tools": []},
+    {"name": "prompt_injection_in_job", "required_tools": ["search_indexed_jobs"], "forbidden_tools": ["update_preferences"]},
+    {"name": "repeated_tool_call", "required_tools": ["search_indexed_jobs"]}
+  ]
+}

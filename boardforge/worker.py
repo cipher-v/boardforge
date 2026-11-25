@@ -56,7 +56,7 @@ async def run_worker_cycle(store, embeddings: EmbeddingClient) -> dict:
 
 async def run_worker(*, once: bool = False) -> None:
     store = create_store()
-    embeddings = EmbeddingClient()
+    embeddings = EmbeddingClient(budget_store=store)
     poll_seconds = max(5, int(os.getenv("BOARDFORGE_WORKER_POLL_SECONDS", "30")))
     while True:
         print(json.dumps(await run_worker_cycle(store, embeddings)))

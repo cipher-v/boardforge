@@ -1,9 +1,11 @@
 import os
+from datetime import datetime, timezone
 
 import pytest
 
 from boardforge.models import CandidateProfile, FeedbackRequest, Job, Preferences
 from boardforge.postgres_store import PostgresStore
+from boardforge.agent_live_eval import _usage_rows
 
 
 POSTGRES_URL = os.getenv("BOARDFORGE_TEST_POSTGRES_URL")
@@ -16,7 +18,8 @@ def test_postgres_store_migrations_fts_vectors_and_state():
         with store.connect() as connection:
             connection.execute(
                 """TRUNCATE jobs,job_events,sync_runs,job_embeddings,profiles,
-                   candidate_profiles,feedback,discovery_requests,discovered_sources
+                   candidate_profiles,feedback,discovery_requests,discovered_sources,
+                   llm_usage_reservations,relevance_verifications,query_embeddings
                    RESTART IDENTITY CASCADE"""
             )
 
@@ -70,6 +73,36 @@ def test_postgres_store_migrations_fts_vectors_and_state():
         vector[0] = 1.0
         store.save_embedding(backend.stable_id, "test-model", "hash", vector)
         assert store.load_embedding(backend.stable_id, "test-model", "hash") == vector
+        store.save_query_embedding(
+            "query-cache-key", "python backend", "test-model", "config-hash", vector,
+        )
+        assert store.load_query_embedding("query-cache-key") == vector
+        store.save_relevance_verification(
+            "relevance-cache-key",
+            {
+                "candidate_id": backend.stable_id,
+                "relevance": "direct",
+                "evidence_ids": ["E001"],
+                "evidence_snippets": ["Python FastAPI PostgreSQL distributed systems"],
+                "evidence_validated": True,
+                "reasoning": "Backend responsibilities match.",
+            },
+        )
+        assert store.load_relevance_verification("relevance-cache-key")["relevance"] == "direct"
+        assert store.reserve_llm_usage(
+            "vertex-gemini", "test-model", "integration-reservation", 100,
+            tpm_limit=1000, tpd_limit=10000, reserved_cost_usd=0.01,
+            cumulative_cost_limit_usd=0.10,
+        )["allowed"] is True
+        store.finalize_llm_usage(
+            "integration-reservation", status="completed", total_tokens=90,
+            estimated_cost_usd=0.009,
+        )
+        usage_summary = store.usage_cost_summary()
+        assert usage_summary["reservations"] >= 1
+        assert usage_summary["estimated_cost_usd"] >= 0.009
+        rows = _usage_rows(store, datetime(2000, 1, 1, tzinfo=timezone.utc))
+        assert any(row["reservation_id"] == "integration-reservation" for row in rows)
         assert store.candidate_jobs(
             "backend", limit=2, query_vector=vector, embedding_model="test-model"
         )[0].external_id == "backend"

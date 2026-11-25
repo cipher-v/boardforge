@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import os
+import uuid
 from dataclasses import dataclass
 from typing import Protocol
 from urllib.parse import urlparse
@@ -123,9 +124,10 @@ class TavilyDiscoveryClient:
     name = "tavily"
     endpoint = "https://api.tavily.com/search"
 
-    def __init__(self, api_key: str | None = None):
+    def __init__(self, api_key: str | None = None, *, budget_store=None):
         self.api_key = api_key or os.getenv("TAVILY_API_KEY", "")
         self.enabled = bool(self.api_key)
+        self.budget_store = budget_store
 
     async def search_urls(self, query: str, *, count: int = 20) -> list[str]:
         if not self.enabled:
@@ -140,6 +142,23 @@ class TavilyDiscoveryClient:
             "include_raw_content": False,
             "include_images": False,
         }
+        reservation_id = None
+        estimated_cost = float(os.getenv("BOARDFORGE_TAVILY_COST_PER_SEARCH_USD", "0"))
+        if self.budget_store is not None:
+            reservation_id = str(uuid.uuid4())
+            admission = self.budget_store.reserve_llm_usage(
+                "tavily", "basic-search", reservation_id, 1,
+                tpm_limit=int(os.getenv("BOARDFORGE_TAVILY_TPM_LIMIT", "60")),
+                tpd_limit=int(os.getenv("BOARDFORGE_TAVILY_DAILY_LIMIT", "900")),
+                reserved_cost_usd=estimated_cost,
+                cumulative_cost_limit_usd=float(os.getenv(
+                    "BOARDFORGE_CUMULATIVE_SPEND_LIMIT_USD", "2.0"
+                )),
+            )
+            if not admission["allowed"]:
+                raise SearchProviderRequestError(
+                    f"tavily budget denied: {admission['reason']}"
+                )
         try:
             async with httpx.AsyncClient(timeout=20) as client:
                 response = await client.post(
@@ -151,7 +170,16 @@ class TavilyDiscoveryClient:
                     json=payload,
                 )
         except (httpx.TimeoutException, httpx.TransportError) as exc:
+            if reservation_id:
+                self.budget_store.finalize_llm_usage(
+                    reservation_id, status="failed", estimated_cost_usd=estimated_cost
+                )
             raise SearchProviderTransientError(f"tavily network failure: {exc}") from exc
+        if reservation_id:
+            self.budget_store.finalize_llm_usage(
+                reservation_id, status="completed", input_tokens=1, total_tokens=1,
+                estimated_cost_usd=estimated_cost,
+            )
         _provider_http_error(self.name, response)
         return [
             item.get("url", "")
@@ -207,10 +235,10 @@ class DisabledSearchProvider:
         return []
 
 
-def create_search_provider() -> SearchProvider:
+def create_search_provider(budget_store=None) -> SearchProvider:
     provider = os.getenv("BOARDFORGE_SEARCH_PROVIDER", "tavily").strip().casefold()
     if provider == "tavily":
-        return TavilyDiscoveryClient()
+        return TavilyDiscoveryClient(budget_store=budget_store)
     if provider == "brave":
         return BraveDiscoveryClient()
     if provider in {"none", "disabled", "off"}:
@@ -278,7 +306,7 @@ async def discover_and_sync(
     max_boards: int = 8,
     client: SearchProvider | None = None,
 ) -> DiscoveryReport:
-    client = client or create_search_provider()
+    client = client or create_search_provider(store)
     provider_name = getattr(client, "name", type(client).__name__)
     if not client.enabled:
         return DiscoveryReport(

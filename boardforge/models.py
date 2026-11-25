@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, HttpUrl
 
 RemotePolicy = Literal["onsite", "hybrid", "remote", "unknown"]
 SalaryPeriod = Literal["hour", "month", "year", "unknown"]
-MatchStatus = Literal["recommended", "needs_verification"]
+MatchStatus = Literal["recommended", "alternative", "needs_verification"]
 
 
 class SourceRef(BaseModel):

@@ -6,6 +6,7 @@ from boardforge.database import StoreProtocol
 from boardforge.planning import plan_tools
 from boardforge.preferences import LLMPreferenceExtractor, effective_search_preferences
 from boardforge.resume import apply_candidate_context
+from boardforge.relevance import RelevanceVerifier
 from boardforge.semantic import EmbeddingClient, retrieve_and_rank_jobs
 
 
@@ -23,10 +24,16 @@ class JobAgent:
         store: StoreProtocol,
         extractor: LLMPreferenceExtractor | None = None,
         embeddings: EmbeddingClient | None = None,
+        relevance_verifier: RelevanceVerifier | None = None,
     ):
         self.store = store
         self.extractor = extractor or LLMPreferenceExtractor()
-        self.embeddings = embeddings or EmbeddingClient()
+        self.embeddings = embeddings or EmbeddingClient(budget_store=store)
+        if hasattr(self.embeddings, "provider") and hasattr(
+            self.embeddings.provider, "budget_store"
+        ):
+            self.embeddings.provider.budget_store = store
+        self.relevance_verifier = relevance_verifier or RelevanceVerifier.from_env(store)
 
     async def update_preferences(self, profile_id: str, text: str) -> AgentResult:
         current = self.store.load_preferences(profile_id)
@@ -34,22 +41,41 @@ class JobAgent:
         self.store.save_preferences(profile_id, updated)
         return AgentResult("Preferences updated.", updated.model_dump())
 
-    async def search_jobs(self, profile_id: str, query: str = "", top_k: int = 10) -> AgentResult:
+    async def search_jobs(
+        self, profile_id: str, query: str = "", top_k: int = 10,
+        *, deadline_monotonic: float | None = None,
+    ) -> AgentResult:
         saved = self.store.load_preferences(profile_id)
         prefs = effective_search_preferences(saved, query) if query else saved
         candidate_profile = self.store.load_candidate_profile(profile_id)
         if candidate_profile:
             prefs = apply_candidate_context(prefs, candidate_profile)
         candidate_limit = max(100, min(1000, top_k * 25))
+        rejected_ids = self.store.rejected_job_ids(profile_id)
+        retrieval_k = (
+            max(top_k, self.relevance_verifier.max_candidates)
+            if self.relevance_verifier.enabled else top_k
+        )
         matches, retrieval = await retrieve_and_rank_jobs(
             self.store,
             prefs,
             query=query,
-            top_k=top_k,
-            rejected_ids=self.store.rejected_job_ids(profile_id),
+            top_k=retrieval_k,
+            rejected_ids=rejected_ids,
             client=self.embeddings,
             candidate_limit=candidate_limit,
+            deadline_monotonic=deadline_monotonic,
         )
+        matches, verification = await self.relevance_verifier.verify_matches(
+            matches,
+            intent=query,
+            preferences=prefs,
+            rejected_ids=rejected_ids,
+            deadline_monotonic=deadline_monotonic,
+        )
+        retrieval["relevance_verification"] = verification
+        retrieval["pre_verification_pool_size"] = retrieval_k
+        matches = matches[:top_k]
         return AgentResult(
             f"Found {len(matches)} ranked jobs.",
             {
@@ -74,15 +100,29 @@ class JobAgent:
         prefs = apply_candidate_context(prefs, candidate_profile)
 
         candidate_limit = max(100, min(1000, top_k * 25))
+        rejected_ids = self.store.rejected_job_ids(profile_id)
+        retrieval_k = (
+            max(top_k, self.relevance_verifier.max_candidates)
+            if self.relevance_verifier.enabled else top_k
+        )
         matches, retrieval = await retrieve_and_rank_jobs(
             self.store,
             prefs,
             query="",
-            top_k=top_k,
-            rejected_ids=self.store.rejected_job_ids(profile_id),
+            top_k=retrieval_k,
+            rejected_ids=rejected_ids,
             client=self.embeddings,
             candidate_limit=candidate_limit,
         )
+        matches, verification = await self.relevance_verifier.verify_matches(
+            matches,
+            intent="",
+            preferences=prefs,
+            rejected_ids=rejected_ids,
+        )
+        retrieval["relevance_verification"] = verification
+        retrieval["pre_verification_pool_size"] = retrieval_k
+        matches = matches[:top_k]
         return AgentResult(
             f"Found {len(matches)} resume-based recommendations.",
             {

@@ -1,0 +1,2 @@
+ALTER TABLE llm_usage_reservations
+  ADD COLUMN IF NOT EXISTS reserved_cost_usd DOUBLE PRECISION NOT NULL DEFAULT 0;

@@ -41,6 +41,19 @@ class FakeAsyncClient:
         return self.response
 
 
+class FakeBudgetStore:
+    def __init__(self):
+        self.reservations = []
+        self.finalized = []
+
+    def reserve_llm_usage(self, *args, **kwargs):
+        self.reservations.append((args, kwargs))
+        return {"allowed": True}
+
+    def finalize_llm_usage(self, *args, **kwargs):
+        self.finalized.append((args, kwargs))
+
+
 def _provider(monkeypatch):
     monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "boardforge-ai-2026")
     monkeypatch.setenv("GOOGLE_CLOUD_LOCATION", "us-central1")
@@ -122,8 +135,35 @@ def test_vertex_embedding_response_dimension_is_validated(monkeypatch):
         )
 
 
+def test_vertex_embedding_reuses_http_client(monkeypatch):
+    provider = _provider(monkeypatch)
+    capture = {"clients": 0}
+    response = FakeResponse(payload={
+        "predictions": [{"embeddings": {"values": [0.01] * 768}}]
+    })
+
+    async def fake_token():
+        return "token"
+
+    def client_factory(**kwargs):
+        capture["clients"] += 1
+        return FakeAsyncClient(capture, response, **kwargs)
+
+    monkeypatch.setattr(provider, "_access_token", fake_token)
+    monkeypatch.setattr("boardforge.semantic.httpx.AsyncClient", client_factory)
+
+    async def twice():
+        await provider.embed(["backend"], task_type=RETRIEVAL_QUERY)
+        await provider.embed(["platform"], task_type=RETRIEVAL_QUERY)
+
+    asyncio.run(twice())
+    assert capture["clients"] == 1
+    assert len(capture["requests"]) == 2
+
+
 def test_vertex_embedding_retries_rate_limit(monkeypatch):
     provider = _provider(monkeypatch)
+    provider.budget_store = FakeBudgetStore()
     provider._max_retries = 1
     capture = {}
     responses = [
@@ -152,3 +192,38 @@ def test_vertex_embedding_retries_rate_limit(monkeypatch):
 
     assert len(capture["requests"]) == 2
     assert len(vectors[0]) == 768
+    assert len(provider.budget_store.reservations) == 2
+    assert len(provider.budget_store.finalized) == 2
+
+
+def test_cancelled_vertex_embedding_finalizes_budget_reservation(monkeypatch):
+    provider = _provider(monkeypatch)
+    provider.budget_store = FakeBudgetStore()
+    capture = {}
+
+    class BlockingClient(FakeAsyncClient):
+        async def post(self, url, **kwargs):
+            self.capture.setdefault("requests", []).append((url, kwargs))
+            await asyncio.Event().wait()
+
+    async def fake_token():
+        return "token"
+
+    monkeypatch.setattr(provider, "_access_token", fake_token)
+    monkeypatch.setattr(
+        "boardforge.semantic.httpx.AsyncClient",
+        lambda **kwargs: BlockingClient(capture, None, **kwargs),
+    )
+
+    async def cancel_request():
+        task = asyncio.create_task(
+            provider.embed(["backend"], task_type=RETRIEVAL_QUERY)
+        )
+        while not provider.budget_store.reservations:
+            await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(cancel_request())
+    assert provider.budget_store.finalized[0][1]["status"] == "failed"

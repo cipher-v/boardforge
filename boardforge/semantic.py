@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import math
 import os
 import random
 import re
 import time
+import uuid
 from typing import Protocol
 
 import httpx
@@ -20,6 +22,7 @@ from boardforge.observability import observe_embedding_request
 RETRIEVAL_QUERY = "RETRIEVAL_QUERY"
 RETRIEVAL_DOCUMENT = "RETRIEVAL_DOCUMENT"
 POSTGRES_EMBEDDING_DIMENSIONS = 768
+QUERY_EMBEDDING_CACHE_VERSION = 1
 
 
 def cosine(a: list[float], b: list[float]) -> float:
@@ -54,6 +57,26 @@ def semantic_query_text(preferences: Preferences, query: str = "") -> str:
     )
     parts = [*preferences.roles, *preferences.prefer_terms, " ".join(cleaned.split())]
     return " ".join(part for part in parts if part).strip()
+
+
+def query_embedding_cache_identity(query: str, client: "EmbeddingClient") -> tuple[str, str, str]:
+    normalized = " ".join(query.casefold().split())
+    configuration = {
+        "version": QUERY_EMBEDDING_CACHE_VERSION,
+        "model": client.model,
+        "dimensions": client.dimensions,
+        "task_type": RETRIEVAL_QUERY,
+    }
+    config_hash = hashlib.sha256(
+        json.dumps(configuration, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    cache_key = hashlib.sha256(
+        json.dumps(
+            {"normalized_query": normalized, "config_hash": config_hash},
+            sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return cache_key, normalized, config_hash
 
 
 class EmbeddingProvider(Protocol):
@@ -116,7 +139,8 @@ class OpenAIEmbeddingProvider:
 
 
 class VertexGeminiEmbeddingProvider:
-    def __init__(self):
+    def __init__(self, *, budget_store=None):
+        self.budget_store = budget_store
         self.project = os.getenv("GOOGLE_CLOUD_PROJECT", "")
         self.location = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
         self.provider_model = os.getenv(
@@ -132,12 +156,24 @@ class VertexGeminiEmbeddingProvider:
         self.enabled = bool(self.project)
         self._credentials = None
         self._auth_request = None
+        self._http_client: httpx.AsyncClient | None = None
         self._concurrency = max(
             1, min(8, int(os.getenv("BOARDFORGE_EMBEDDING_CONCURRENCY", "4")))
         )
         self._max_retries = max(
             0, min(5, int(os.getenv("BOARDFORGE_EMBEDDING_MAX_RETRIES", "3")))
         )
+        self._semaphore = asyncio.Semaphore(self._concurrency)
+
+    def _get_http_client(self) -> httpx.AsyncClient:
+        if self._http_client is None:
+            self._http_client = httpx.AsyncClient(timeout=45)
+        return self._http_client
+
+    async def aclose(self) -> None:
+        if self._http_client is not None:
+            await self._http_client.aclose()
+            self._http_client = None
 
     def _ensure_credentials(self):
         if self._credentials is not None:
@@ -191,6 +227,26 @@ class VertexGeminiEmbeddingProvider:
         }
         response = None
         for attempt in range(self._max_retries + 1):
+            reservation_id = None
+            estimated_tokens = max(1, math.ceil(len(text.encode("utf-8")) / 4))
+            estimated_cost = estimated_tokens * float(os.getenv(
+                "BOARDFORGE_VERTEX_EMBEDDING_USD_PER_MILLION", "0.15"
+            )) / 1_000_000
+            if self.budget_store is not None:
+                reservation_id = str(uuid.uuid4())
+                admission = self.budget_store.reserve_llm_usage(
+                    "vertex-embedding", self.model, reservation_id, estimated_tokens,
+                    tpm_limit=int(os.getenv("BOARDFORGE_VERTEX_EMBEDDING_TPM_LIMIT", "1000000")),
+                    tpd_limit=int(os.getenv("BOARDFORGE_VERTEX_EMBEDDING_TPD_LIMIT", "10000000")),
+                    reserved_cost_usd=estimated_cost,
+                    cumulative_cost_limit_usd=float(os.getenv(
+                        "BOARDFORGE_CUMULATIVE_SPEND_LIMIT_USD", "2.0"
+                    )),
+                )
+                if not admission["allowed"]:
+                    raise RuntimeError(
+                        f"Vertex embedding budget denied: {admission['reason']}"
+                    )
             started = time.perf_counter()
             try:
                 async with semaphore:
@@ -202,13 +258,32 @@ class VertexGeminiEmbeddingProvider:
                         },
                         json=payload,
                     )
+            except asyncio.CancelledError:
+                if reservation_id:
+                    self.budget_store.finalize_llm_usage(
+                        reservation_id, status="failed", estimated_cost_usd=estimated_cost
+                    )
+                observe_embedding_request(
+                    "vertex", task_type, "cancelled", time.perf_counter() - started
+                )
+                raise
             except (httpx.TimeoutException, httpx.TransportError):
+                if reservation_id:
+                    self.budget_store.finalize_llm_usage(
+                        reservation_id, status="failed", estimated_cost_usd=estimated_cost
+                    )
                 observe_embedding_request(
                     "vertex", task_type, "transport_error", time.perf_counter() - started
                 )
                 if attempt >= self._max_retries:
                     raise
             else:
+                if reservation_id:
+                    self.budget_store.finalize_llm_usage(
+                        reservation_id, status="completed",
+                        input_tokens=estimated_tokens, total_tokens=estimated_tokens,
+                        estimated_cost_usd=estimated_cost,
+                    )
                 observe_embedding_request(
                     "vertex", task_type, str(response.status_code), time.perf_counter() - started
                 )
@@ -258,14 +333,13 @@ class VertexGeminiEmbeddingProvider:
             return []
 
         token = await self._access_token()
-        semaphore = asyncio.Semaphore(self._concurrency)
-        async with httpx.AsyncClient(timeout=45) as client:
-            return await asyncio.gather(
-                *(
-                    self._embed_one(client, token, text, task_type, semaphore)
-                    for text in texts
-                )
+        client = self._get_http_client()
+        return await asyncio.gather(
+            *(
+                self._embed_one(client, token, text, task_type, self._semaphore)
+                for text in texts
             )
+        )
 
 
 def create_embedding_provider() -> EmbeddingProvider:
@@ -282,9 +356,11 @@ def create_embedding_provider() -> EmbeddingProvider:
 class EmbeddingClient:
     """Feature-gated facade over the configured embedding provider."""
 
-    def __init__(self, provider: EmbeddingProvider | None = None):
+    def __init__(self, provider: EmbeddingProvider | None = None, *, budget_store=None):
         self._provider_injected = provider is not None
         self.provider = provider or create_embedding_provider()
+        if budget_store is not None and hasattr(self.provider, "budget_store"):
+            self.provider.budget_store = budget_store
 
     @property
     def model(self) -> str:
@@ -416,21 +492,57 @@ async def retrieve_and_rank_jobs(
     rejected_ids: set[str],
     client: EmbeddingClient,
     candidate_limit: int,
+    deadline_monotonic: float | None = None,
 ) -> tuple[list[Match], dict]:
+    total_started = time.perf_counter()
     retrieval_query = semantic_query_text(prefs, query)
     query_vector: list[float] | None = None
     semantic_retrieval = False
     embedding_error: str | None = None
+    query_embedding_cache_hit = False
+    query_embedding_source = "disabled"
+    embedding_started = time.perf_counter()
     if client.enabled and retrieval_query:
-        try:
-            query_vector = (
-                await client.embed([retrieval_query], task_type=RETRIEVAL_QUERY)
-            )[0]
+        cache_key, normalized_query, config_hash = query_embedding_cache_identity(
+            retrieval_query, client
+        )
+        query_vector = (
+            store.load_query_embedding(cache_key)
+            if hasattr(store, "load_query_embedding") else None
+        )
+        if query_vector is not None:
             semantic_retrieval = True
-        except Exception as exc:
-            query_vector = None
-            embedding_error = f"{type(exc).__name__}: {exc}"
+            query_embedding_cache_hit = True
+            query_embedding_source = "persistent_cache"
+        else:
+            min_remaining = max(0.1, float(os.getenv(
+                "BOARDFORGE_EMBEDDING_MIN_REMAINING_SECONDS", "3"
+            )))
+            remaining = (
+                deadline_monotonic - time.perf_counter()
+                if deadline_monotonic is not None else None
+            )
+            if remaining is not None and remaining < min_remaining:
+                embedding_error = "insufficient_remaining_time_for_query_embedding"
+                query_embedding_source = "deadline_skip"
+            else:
+                try:
+                    query_vector = (
+                        await client.embed([retrieval_query], task_type=RETRIEVAL_QUERY)
+                    )[0]
+                    if hasattr(store, "save_query_embedding"):
+                        store.save_query_embedding(
+                            cache_key, normalized_query, client.model, config_hash, query_vector
+                        )
+                    semantic_retrieval = True
+                    query_embedding_source = "provider"
+                except Exception as exc:
+                    query_vector = None
+                    embedding_error = f"{type(exc).__name__}: {exc}"
+                    query_embedding_source = "provider_failure"
+    query_embedding_ms = (time.perf_counter() - embedding_started) * 1000
 
+    database_started = time.perf_counter()
     jobs = store.candidate_jobs(
         retrieval_query,
         limit=candidate_limit,
@@ -438,6 +550,8 @@ async def retrieve_and_rank_jobs(
         embedding_model=client.model if query_vector is not None else "",
         preferences=prefs,
     )
+    database_ms = (time.perf_counter() - database_started) * 1000
+    ranking_started = time.perf_counter()
     matches = await hybrid_rank_jobs(
         jobs,
         prefs,
@@ -449,13 +563,22 @@ async def retrieve_and_rank_jobs(
         query_vector=query_vector,
         query_embedding_attempted=client.enabled and bool(retrieval_query),
     )
+    ranking_ms = (time.perf_counter() - ranking_started) * 1000
     return matches, {
         "store": type(store).__name__,
         "candidate_count": len(jobs),
         "candidate_limit": candidate_limit,
         "semantic_retrieval": semantic_retrieval,
+        "query_embedding_cache_hit": query_embedding_cache_hit,
+        "query_embedding_source": query_embedding_source,
         "embedding_model": client.model if client.enabled else None,
         "embedding_error": embedding_error,
+        "latency_ms": {
+            "query_embedding": round(query_embedding_ms, 2),
+            "database_retrieval": round(database_ms, 2),
+            "ranking": round(ranking_ms, 2),
+            "retrieval_total": round((time.perf_counter() - total_started) * 1000, 2),
+        },
         "hard_filters_pushed_down": isinstance(prefs, Preferences) and bool(
             prefs.countries
             or prefs.locations

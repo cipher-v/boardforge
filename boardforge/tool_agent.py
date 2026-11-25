@@ -126,3 +126,9 @@ class ToolCallingAgent:
                 })
 
         return {"mode":"llm-tools","message":"Tool-call limit reached."}
+
+
+# Keep this import path stable for the API while the bounded Vertex/Groq
+# orchestrator lives in its own module. The legacy class above remains readable
+# during review but is no longer selected.
+from boardforge.intelligent_agent import ToolCallingAgent as ToolCallingAgent

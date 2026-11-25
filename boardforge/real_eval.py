@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from boardforge.evals import ndcg_at_k, precision_among_returned, precision_at_k, recall_at_k
+from boardforge.database import create_store
 from boardforge.matching import hard_violations, job_text
 from boardforge.models import Job, Preferences
 from boardforge.preferences import effective_search_preferences
@@ -209,7 +210,7 @@ async def run_real_eval(
     jobs = [Job.model_validate(item) for item in corpus["jobs"]]
     _validate_dataset(jobs, dataset)
 
-    embeddings = client or EmbeddingClient()
+    embeddings = client or EmbeddingClient(budget_store=create_store())
     if not embeddings.enabled:
         return {
             "status": "skipped",

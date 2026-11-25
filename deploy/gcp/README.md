@@ -26,6 +26,26 @@ The script creates a least-purpose runtime service account, grants Vertex AI
 User and Secret Manager Secret Accessor, builds the image, and deploys both
 resources. It does not create or modify the external PostgreSQL database.
 
+The optional relevance verifier remains disabled unless deployment explicitly
+passes `-EnableRelevanceVerifier`. Vertex Gemini is the default and authenticates
+as the existing Cloud Run service account, so it requires no extra API-key
+secret:
+
+```powershell
+.\deploy\gcp\deploy.ps1 -ProjectId YOUR_PROJECT_ID -EnableRelevanceVerifier
+```
+
+The script then sets `BOARDFORGE_ENABLE_RELEVANCE_VERIFIER=1`, a 20-candidate
+shortlist and batches of eight. The maintenance job receives neither relevance
+configuration nor a provider key because verification runs only during
+interactive search. Omit the switch for deterministic baseline deployments.
+The cost-estimation rates in the deployment environment reflect Gemini 3.8
+Flash pricing through 2026-12-31 and must be updated if Google changes pricing.
+
+To use Groq instead, create `boardforge-relevance-key` and deploy with
+`-RelevanceProvider groq -RelevanceModel openai/gpt-oss-120b`. Only that
+alternative mounts the provider key into the API service.
+
 For a manual maintenance run:
 
 ```powershell

@@ -12,6 +12,7 @@ from boardforge.holdout import (
 )
 from boardforge.holdout_eval import (
     CachedEmbeddingProvider,
+    _aggregate_rows,
     assert_isolated_database_url,
     plan_vertex_usage,
 )
@@ -114,3 +115,27 @@ def test_embedding_cache_deduplicates_and_persists_across_variants(tmp_path: Pat
     reloaded = CachedEmbeddingProvider(_FakeProvider(), path)
     asyncio.run(reloaded.embed(["same"], task_type="RETRIEVAL_QUERY"))
     assert reloaded.provider_calls == 0
+
+
+def test_empty_ground_truth_is_excluded_and_false_recommendations_are_micro_counted():
+    row = {
+        "candidate_recall": None,
+        "precision_at_10": 0.0,
+        "recall_at_10": None,
+        "ndcg_at_10": None,
+        "graded_ndcg_at_10": None,
+        "predicted": ["a", "b"],
+        "recommended": ["a"],
+        "false_recommendation_count": 1,
+        "relevant_count": 0,
+        "statuses": ["recommended", "needs_verification"],
+        "forbidden_hits": [],
+        "hard_constraint_hits": [],
+    }
+    summary = _aggregate_rows([row], [12.0])
+    assert summary["recall_at_10"] is None
+    assert summary["ndcg_at_10"] is None
+    assert summary["recommended_precision"] == 0.0
+    assert summary["recommended_irrelevant_rate"] == 1.0
+    assert summary["recommendation_coverage"] == 0.5
+    assert summary["abstention_rate"] == 0.5

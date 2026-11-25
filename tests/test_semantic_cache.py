@@ -1,14 +1,16 @@
 import asyncio
 from pathlib import Path
+import time
 
 from boardforge.models import Job, Preferences
-from boardforge.semantic import hybrid_rank_jobs, semantic_query_text
+from boardforge.semantic import hybrid_rank_jobs, retrieve_and_rank_jobs, semantic_query_text
 from boardforge.store import Store
 
 
 class FakeEmbeddings:
     enabled = True
     model = "fake-v1"
+    dimensions = 2
 
     def __init__(self):
         self.calls: list[tuple[str, list[str]]] = []
@@ -50,6 +52,45 @@ def test_store_backed_search_does_not_embed_missing_documents(tmp_path: Path):
 
     assert [task for task, _ in client.calls] == ["RETRIEVAL_QUERY"]
     assert [len(texts) for _, texts in client.calls] == [1]
+
+
+def test_query_embedding_is_persisted_and_reused_for_normalized_query(tmp_path: Path):
+    store = Store(str(tmp_path / "query-cache.db"))
+    store.upsert_source_jobs("benchmark", "cache", [
+        make_job("1", "Build Python APIs and distributed systems."),
+    ])
+    client = FakeEmbeddings()
+
+    async def search(query):
+        return await retrieve_and_rank_jobs(
+            store, Preferences(), query=query, top_k=10, rejected_ids=set(),
+            client=client, candidate_limit=100,
+        )
+
+    _, cold = asyncio.run(search("  Python   systems "))
+    _, warm = asyncio.run(search("python systems"))
+
+    assert len(client.calls) == 1
+    assert cold["query_embedding_source"] == "provider"
+    assert cold["query_embedding_cache_hit"] is False
+    assert warm["query_embedding_source"] == "persistent_cache"
+    assert warm["query_embedding_cache_hit"] is True
+
+
+def test_query_embedding_is_not_started_past_deadline(tmp_path: Path):
+    store = Store(str(tmp_path / "deadline-cache.db"))
+    store.upsert_source_jobs("benchmark", "cache", [
+        make_job("1", "Build Python APIs."),
+    ])
+    client = FakeEmbeddings()
+    matches, metadata = asyncio.run(retrieve_and_rank_jobs(
+        store, Preferences(), query="Python", top_k=10, rejected_ids=set(),
+        client=client, candidate_limit=100, deadline_monotonic=time.perf_counter(),
+    ))
+    assert matches
+    assert client.calls == []
+    assert metadata["query_embedding_source"] == "deadline_skip"
+    assert metadata["embedding_error"] == "insufficient_remaining_time_for_query_embedding"
 
 
 def test_hybrid_keeps_verified_matches_ahead_of_needs_verification(tmp_path: Path):

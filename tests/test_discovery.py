@@ -94,9 +94,19 @@ def test_tavily_http_contract(monkeypatch):
         lambda **kwargs: _FakeAsyncClient(capture, response, **kwargs),
     )
 
-    urls = asyncio.run(
-        TavilyDiscoveryClient("test-key").search_urls("backend engineer India", count=7)
-    )
+    class Budget:
+        def __init__(self):
+            self.reserved = self.finalized = 0
+        def reserve_llm_usage(self, *args, **kwargs):
+            self.reserved += 1
+            return {"allowed": True}
+        def finalize_llm_usage(self, *args, **kwargs):
+            self.finalized += 1
+
+    budget = Budget()
+    urls = asyncio.run(TavilyDiscoveryClient(
+        "test-key", budget_store=budget
+    ).search_urls("backend engineer India", count=7))
 
     assert capture["method"] == "POST"
     assert capture["url"] == "https://api.tavily.com/search"
@@ -109,6 +119,7 @@ def test_tavily_http_contract(monkeypatch):
         "https://job-boards.greenhouse.io/acme/jobs/123",
         "https://jobs.ashbyhq.com/demo/abc",
     ]
+    assert (budget.reserved, budget.finalized) == (1, 1)
 
 
 @pytest.mark.parametrize(

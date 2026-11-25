@@ -284,6 +284,73 @@ OPENAI_MODEL=gpt-4.1-mini
 
 The LLM is intentionally kept at the probabilistic boundary. Ingestion, persistence, hard constraints, state tracking and evaluation remain deterministic and testable.
 
+## Optional relevance verification
+
+BoardForge can conservatively verify the deterministic recommendation shortlist
+with structured LLM calls. It is disabled by default. When enabled, it checks
+both recommendations and plausible uncertain candidates before final top-K.
+
+```text
+BOARDFORGE_ENABLE_RELEVANCE_VERIFIER=1
+BOARDFORGE_RELEVANCE_PROVIDER=vertex
+GOOGLE_CLOUD_PROJECT=boardforge-ai-2026
+BOARDFORGE_RELEVANCE_VERTEX_LOCATION=global
+BOARDFORGE_RELEVANCE_MODEL=gemini-3.8-flash
+BOARDFORGE_RELEVANCE_BATCH_SIZE=8
+BOARDFORGE_RELEVANCE_MAX_CANDIDATES=20
+```
+
+Vertex uses Application Default Credentials locally and the Cloud Run service
+account in production; it does not use a Gemini API key. Set the provider to
+`groq`, plus `BOARDFORGE_RELEVANCE_API_KEY` and
+`BOARDFORGE_GROQ_RELEVANCE_MODEL=openai/gpt-oss-120b`, to use the alternative
+adapter. Groq output is capped at 1,280 tokens; token-aware planning prefers
+batches of at most four and preserves descriptions up to the configured
+12,000-character ceiling.
+
+The verifier batches candidates, requires stable source evidence references, and
+caches judgments. Direct matches are recommendations, adjacent matches are
+identified alternatives, irrelevant matches are omitted, and uncertain or
+failed judgments remain `needs_verification`. Unknown eligibility, confirmed
+vacancy closure, hard constraints, and rejected-job memory remain authoritative.
+Candidate descriptions are passed as untrusted data and instructions inside
+them are never part of the verifier control prompt.
+
+Each search is additionally bounded by model-call, token, retry, concurrency,
+output-token, and thinking-token settings. Provider metadata records input,
+output and thinking tokens, latency, HTTP attempts, and estimated cost.
+
+## Optional intelligent agent
+
+The `/agent` endpoint uses the deterministic planner unless explicitly enabled.
+The intelligent mode keeps the existing `JobAgent` core and adds bounded native
+function calling through Vertex Gemini:
+
+```text
+BOARDFORGE_ENABLE_INTELLIGENT_AGENT=1
+BOARDFORGE_AGENT_PROVIDER=vertex
+BOARDFORGE_AGENT_MAX_ITERATIONS=4
+BOARDFORGE_AGENT_MAX_TOOL_CALLS=8
+BOARDFORGE_AGENT_MAX_TOKENS_PER_TURN=20000
+BOARDFORGE_AGENT_TOTAL_TIMEOUT_SECONDS=45
+```
+
+It searches the index before discovery, reads persistent profile/preferences and
+feedback, and can queue discovery or synchronize only registered trusted sources.
+Preference and feedback writes require deterministic authorization from the
+current user turn. Set `BOARDFORGE_AGENT_PROVIDER=groq` to select the existing
+Groq key and fixed `openai/gpt-oss-120b` model manually; there is no automatic
+provider fallback. Model calls share the persistent cumulative budget ledger.
+
+Plan the holdout comparison without making model calls:
+
+```bash
+python -m boardforge.cli relevance-eval
+```
+
+Paid execution is deliberately separate and requires `--execute` plus an
+isolated evaluation database.
+
 ## Temporal intelligence
 
 The same source is synced repeatedly. BoardForge records first-seen time, last observation, content changes, disappearance from the source, and active/closed state. Jobs close only after two consecutive successful observations in which they are absent. Empty or abnormally shrunken source responses are rejected rather than interpreted as mass closures.

@@ -95,7 +95,7 @@ def deterministic_extract(text: str, current: Preferences | None = None) -> Pref
     if "onsite only" in low or "on-site only" in low:
         p.remote_ok = False
         p.onsite_ok = True
-    if "remote only" in low:
+    if "remote only" in low or re.search(r"\bonly (?:show )?remote\b", low):
         p.remote_ok = True
         p.onsite_ok = False
     if any(phrase in low for phrase in ["not onsite", "not on-site", "avoid onsite", "avoid on-site"]):

@@ -24,7 +24,16 @@ from boardforge.store import Store
 from boardforge.sync import sync_url
 from boardforge.holdout import collect_holdout
 from boardforge.holdout_labels import label_holdout
-from boardforge.holdout_eval import plan_vertex_usage, run_production_holdout_eval
+from boardforge.holdout_eval import (
+    holdout_comparison_markdown,
+    plan_vertex_usage,
+    run_production_holdout_eval,
+)
+from boardforge.relevance import RelevanceVerifier, create_relevance_provider
+from boardforge.relevance_eval import (
+    plan_relevance_verifier_eval,
+    run_relevance_verifier_eval,
+)
 
 
 def _print_json(value) -> None:
@@ -141,9 +150,10 @@ def main() -> None:
 
     p_holdout_eval = sub.add_parser("holdout-eval")
     p_holdout_eval.add_argument("--corpus", default="boardforge/data/holdout_corpus_v1.json")
-    p_holdout_eval.add_argument("--labels", default="boardforge/data/holdout_labels_v1_provisional.json")
+    p_holdout_eval.add_argument("--labels", default="boardforge/data/holdout_labels_v1_1_ai_audited.json")
     p_holdout_eval.add_argument("--cache", default="results/holdout-embedding-cache.json")
     p_holdout_eval.add_argument("--out", default="results/holdout-eval.json")
+    p_holdout_eval.add_argument("--markdown-out", default="results/holdout-eval.md")
     p_holdout_eval.add_argument("--database-url", default=None)
     p_holdout_eval.add_argument("--top-k", type=int, default=10)
     p_holdout_eval.add_argument("--candidate-limit", type=int, default=50)
@@ -151,6 +161,18 @@ def main() -> None:
         "--execute-vertex", action="store_true",
         help="Execute the paid Vertex/PostgreSQL evaluation; without this flag only usage is planned.",
     )
+
+    p_relevance_eval = sub.add_parser("relevance-eval")
+    p_relevance_eval.add_argument("--corpus", default="boardforge/data/holdout_corpus_v1.json")
+    p_relevance_eval.add_argument("--labels", default="boardforge/data/holdout_labels_v1_1_ai_audited.json")
+    p_relevance_eval.add_argument("--deterministic-report", default="results/holdout-eval-v1_1-ai-audited.json")
+    p_relevance_eval.add_argument("--out", default="results/relevance-verifier-eval.json")
+    p_relevance_eval.add_argument("--database-url", default=None)
+    p_relevance_eval.add_argument(
+        "--checkpoint", default="results/relevance-verifier-eval.checkpoint.json"
+    )
+    p_relevance_eval.add_argument("--max-cost-usd", type=float, default=0.60)
+    p_relevance_eval.add_argument("--execute", action="store_true")
 
     args = parser.parse_args()
 
@@ -183,7 +205,58 @@ def main() -> None:
         output_path = Path(args.out)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
-        _print_json({**plan, "execution": report, "output": str(output_path)})
+        markdown_path = Path(args.markdown_out)
+        markdown_path.parent.mkdir(parents=True, exist_ok=True)
+        markdown_path.write_text(holdout_comparison_markdown(report), encoding="utf-8")
+        _print_json({
+            **plan,
+            "execution_status": report["status"],
+            "embedding_usage": report["embedding_usage"],
+            "output": str(output_path),
+            "markdown_output": str(markdown_path),
+        })
+        return
+
+    if args.cmd == "relevance-eval":
+        plan = plan_relevance_verifier_eval(
+            args.corpus, args.labels, args.deterministic_report
+        )
+        if not args.execute:
+            _print_json(plan)
+            return
+        database_url = args.database_url or os.getenv(
+            "BOARDFORGE_HOLDOUT_DATABASE_URL", ""
+        )
+        if not database_url:
+            raise RuntimeError(
+                "--execute requires an isolated --database-url or "
+                "BOARDFORGE_HOLDOUT_DATABASE_URL"
+            )
+        from boardforge.holdout_eval import assert_isolated_database_url
+        from boardforge.postgres_store import PostgresStore
+
+        assert_isolated_database_url(database_url)
+        store = PostgresStore(database_url, min_size=1, max_size=2)
+        try:
+            verifier = RelevanceVerifier(
+                store, create_relevance_provider(), enabled=True
+            )
+            verifier.cumulative_cost_limit_usd = args.max_cost_usd
+            if hasattr(verifier.provider, "backend"):
+                verifier.provider.backend.max_retries = max(0, min(
+                    1, int(os.getenv("BOARDFORGE_EVAL_PROVIDER_MAX_RETRIES", "0"))
+                ))
+            report = asyncio.run(run_relevance_verifier_eval(
+                args.corpus, args.labels, args.deterministic_report, verifier,
+                checkpoint_path=args.checkpoint,
+                max_estimated_cost_usd=args.max_cost_usd,
+            ))
+        finally:
+            store.close()
+        output_path = Path(args.out)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        _print_json({**plan, "execution_status": report["status"], "output": str(output_path)})
         return
 
     if args.cmd == "benchmark":
@@ -242,7 +315,7 @@ def main() -> None:
                 "Set DATABASE_URL for PostgreSQL, or pass --allow-sqlite intentionally."
             )
         out = asyncio.run(warm_job_embeddings(
-            store, EmbeddingClient(),
+            store, EmbeddingClient(budget_store=store),
             batch_size=args.batch_size,
             max_jobs=args.max_jobs,
             countries=args.country or None,

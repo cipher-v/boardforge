@@ -36,7 +36,7 @@ def queue_discovery(
     query: str = "",
     client: SearchProvider | None = None,
 ) -> dict:
-    client = client or create_search_provider()
+    client = client or create_search_provider(store)
     if not client.enabled:
         return {
             "request_id": None,
