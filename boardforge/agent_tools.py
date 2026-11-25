@@ -114,6 +114,7 @@ class AgentExecutionState:
     seen_calls: set[str] = field(default_factory=set)
     trace: list[dict[str, Any]] = field(default_factory=list)
     last_search: dict[str, Any] | None = None
+    best_search: dict[str, Any] | None = None
 
 
 Syncer = Callable[[str, Any], Awaitable[Any]]
@@ -153,6 +154,34 @@ class AgentToolExecutor:
             r"changed my mind|prefer|want|minimum|remote|onsite|hybrid|worldwide)\b",
             quote, re.I,
         ))
+
+    @staticmethod
+    def _should_replace_best_search(
+        current: dict[str, Any] | None, candidate: dict[str, Any],
+    ) -> bool:
+        if current is None:
+            return True
+        current_recommended = int(current.get("recommended_count", 0))
+        candidate_recommended = int(candidate.get("recommended_count", 0))
+        if candidate_recommended != current_recommended:
+            return candidate_recommended > current_recommended
+        outcome_rank = {
+            "verification_provider_failure": 0,
+            "verification_incomplete": 1,
+            "no_verified_recommendations": 2,
+            "verified_recommendations": 3,
+        }
+        current_rank = outcome_rank.get(current.get("result_state"), 0)
+        candidate_rank = outcome_rank.get(candidate.get("result_state"), 0)
+        if candidate_rank != current_rank:
+            if candidate_rank > current_rank:
+                return True
+            # Partial candidates are still more useful than an empty earlier
+            # result, even when the later verification outcome is incomplete.
+            return not current.get("matches") and bool(candidate.get("matches"))
+        if candidate.get("matches"):
+            return True
+        return not current.get("matches")
 
     @staticmethod
     def _bounded_match(match: dict[str, Any]) -> dict[str, Any]:
@@ -257,14 +286,29 @@ class AgentToolExecutor:
                     searched.data.get("retrieval", {})
                 ),
             }
-            verification = result["retrieval"].get("verification", {})
+            verification = searched.data.get(
+                "retrieval", {}
+            ).get("verification", {})
+
             if state.recommended_count:
                 result["result_state"] = "verified_recommendations"
+
             elif verification.get("provider_failures"):
                 result["result_state"] = "verification_provider_failure"
+
+            elif any((
+                verification.get("candidate_validation_failures"),
+                verification.get("budget_skipped_candidates"),
+                verification.get("deadline_skipped_candidates"),
+                verification.get("quota_denials"),
+            )):
+                result["result_state"] = "verification_incomplete"
+
             else:
                 result["result_state"] = "no_verified_recommendations"
             state.last_search = result
+            if self._should_replace_best_search(state.best_search, result):
+                state.best_search = result
         elif name == "discover_job_sources":
             if not self.allow_discovery:
                 return {"ok": False, "error": "discovery_disabled_for_evaluation"}

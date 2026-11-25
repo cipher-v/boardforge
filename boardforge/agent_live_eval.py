@@ -25,6 +25,59 @@ SCENARIO_TEXT = (
     "unchanged. Search only the existing index; do not discover or sync sources."
 )
 
+# This runner is a frozen comparison scenario, so its provider/model pair must
+# not depend on a developer's shell or .env defaults. v3 used this exact model.
+LIVE_VERTEX_MODEL = "gemini-3.8-flash"
+
+
+def _live_environment_settings() -> dict[str, str]:
+    """Return frozen live settings without mutating the caller's environment."""
+    return {
+        "BOARDFORGE_ENABLE_EMBEDDINGS": "1",
+        "BOARDFORGE_EMBEDDING_PROVIDER": "vertex",
+        "BOARDFORGE_ENABLE_RELEVANCE_VERIFIER": "1",
+        "BOARDFORGE_RELEVANCE_PROVIDER": "vertex",
+        "BOARDFORGE_RELEVANCE_MODEL": LIVE_VERTEX_MODEL,
+        "BOARDFORGE_ENABLE_INTELLIGENT_AGENT": "1",
+        "BOARDFORGE_AGENT_PROVIDER": "vertex",
+        "BOARDFORGE_RELEVANCE_MAX_RETRIES": "0",
+        "BOARDFORGE_EMBEDDING_MAX_RETRIES": "0",
+        "BOARDFORGE_RELEVANCE_MAX_CANDIDATES": "4",
+        "BOARDFORGE_RELEVANCE_BATCH_SIZE": "4",
+        "BOARDFORGE_RELEVANCE_MAX_CALLS_PER_SEARCH": "1",
+        "BOARDFORGE_RELEVANCE_MAX_DESCRIPTION_CHARS": "4000",
+        "BOARDFORGE_AGENT_MAX_ITERATIONS": "3",
+        "BOARDFORGE_AGENT_MAX_TOOL_CALLS": "5",
+        "BOARDFORGE_AGENT_MIN_SUFFICIENT_RESULTS": "1",
+        "BOARDFORGE_AGENT_MIN_EXPENSIVE_TOOL_SECONDS": "10",
+        "BOARDFORGE_EMBEDDING_MIN_REMAINING_SECONDS": "3",
+        "BOARDFORGE_RELEVANCE_MIN_REMAINING_SECONDS": "5",
+    }
+
+
+def _validate_live_provider(provider: VertexGeminiLLMProvider) -> None:
+    if provider.provider_name != "vertex-gemini" or provider.model != LIVE_VERTEX_MODEL:
+        raise RuntimeError(
+            "live evaluation provider/model mismatch: expected "
+            f"vertex-gemini/{LIVE_VERTEX_MODEL}, got "
+            f"{provider.provider_name}/{provider.model}"
+        )
+
+
+def _usage_cost_breakdown(rows: list[dict[str, Any]]) -> dict[str, float]:
+    """Separate actual usage estimates from conservative ledger accounting."""
+    provider_estimated = sum(float(row.get("estimated_cost_usd") or 0) for row in rows)
+    conservative = sum(
+        float(row.get("estimated_cost_usd") or 0)
+        if row.get("status") == "completed"
+        else float(row.get("reserved_cost_usd") or 0)
+        for row in rows
+    )
+    return {
+        "provider_estimated_cost_usd": round(provider_estimated, 8),
+        "conservative_accounted_cost_usd": round(conservative, 8),
+    }
+
 
 def _usage_rows(store: PostgresStore, started_at: datetime) -> list[dict[str, Any]]:
     with store.connect() as connection:
@@ -50,9 +103,14 @@ def _cache_counts(store: PostgresStore, embedding_model: str) -> dict[str, int]:
         relevance = connection.execute(
             "SELECT COUNT(*) AS count FROM relevance_verifications"
         ).fetchone()["count"]
+        query_embeddings = connection.execute(
+            "SELECT COUNT(*) AS count FROM query_embeddings WHERE model=%s",
+            (embedding_model,),
+        ).fetchone()["count"]
     return {
         "active_jobs": int(jobs), "cached_document_embeddings": int(embeddings),
         "cached_relevance_judgments": int(relevance),
+        "cached_query_embeddings": int(query_embeddings),
     }
 
 
@@ -94,34 +152,81 @@ def _refinement_assessment(search_events: list[dict[str, Any]]) -> list[dict[str
     return rows
 
 
+def _execution_outcome(result: dict[str, Any]) -> dict[str, Any]:
+    agent = result.get("agent", {})
+    stop_reason = agent.get("stopped_reason")
+    verification_outcome = agent.get("verification_outcome")
+    matches = result.get("matches") or []
+    unknown_eligibility = sum(
+        any(
+            marker in str(risk).casefold()
+            for marker in (
+                "eligibility_unknown",
+                "experience requirement not verified",
+                "salary eligibility",
+            )
+        )
+        for match in matches
+        for risk in [match.get("risks", [])]
+    )
+    execution_limits = {
+        "iteration_limit", "tool_call_limit", "total_timeout", "tool_timeout",
+        "insufficient_remaining_time", "token_limit",
+    }
+    verification_complete = verification_outcome not in {
+        "verification_incomplete", "verification_provider_failure",
+    }
+    execution_complete = stop_reason not in execution_limits and stop_reason != "provider_failure"
+    if stop_reason == "provider_failure":
+        classification = "agent_provider_failure"
+    elif verification_outcome == "verification_provider_failure":
+        classification = "verification_provider_failure"
+    elif verification_outcome == "verification_incomplete":
+        classification = "verification_incomplete"
+    elif stop_reason in execution_limits:
+        classification = "execution_limit"
+    elif stop_reason == "sufficient_results":
+        classification = "verified_recommendations"
+    elif stop_reason == "no_verified_recommendations" and unknown_eligibility:
+        classification = "no_verified_recommendations_unknown_eligibility"
+    elif stop_reason == "no_verified_recommendations" and matches:
+        classification = "no_confident_recommendations"
+    elif stop_reason == "no_verified_recommendations":
+        classification = "no_suitable_indexed_jobs"
+    else:
+        classification = "other_incomplete"
+    return {
+        "classification": classification,
+        "stop_reason": stop_reason,
+        "verification_outcome": verification_outcome,
+        "execution_complete": execution_complete,
+        "verification_complete": verification_complete,
+        "unknown_eligibility_count": unknown_eligibility,
+        "genuine_empty_result": (
+            classification == "no_suitable_indexed_jobs"
+        ),
+        "successful_terminal": (
+            execution_complete
+            and verification_complete
+            and stop_reason in {
+                "sufficient_results", "no_verified_recommendations",
+            }
+        ),
+    }
+
+
 async def run_live_agent_evaluation(
     *, database_url: str, output_path: Path, profile_id: str,
-    max_incremental_cost_usd: float,
+    max_incremental_cost_usd: float, warm_replay: bool = False,
 ) -> dict[str, Any]:
     if output_path.exists():
         raise RuntimeError(
             f"refusing to repeat paid scenario because artifact exists: {output_path}"
         )
-    if not 0 < max_incremental_cost_usd <= 0.04:
-        raise ValueError("incremental cost limit must be greater than zero and at most $0.04")
+    if not 0 < max_incremental_cost_usd <= 0.02:
+        raise ValueError("incremental cost limit must be greater than zero and at most $0.02")
 
-    os.environ.update({
-        "BOARDFORGE_ENABLE_EMBEDDINGS": "1",
-        "BOARDFORGE_EMBEDDING_PROVIDER": "vertex",
-        "BOARDFORGE_ENABLE_RELEVANCE_VERIFIER": "1",
-        "BOARDFORGE_RELEVANCE_PROVIDER": "vertex",
-        "BOARDFORGE_ENABLE_INTELLIGENT_AGENT": "1",
-        "BOARDFORGE_AGENT_PROVIDER": "vertex",
-        "BOARDFORGE_RELEVANCE_MAX_RETRIES": "0",
-        "BOARDFORGE_EMBEDDING_MAX_RETRIES": "0",
-        "BOARDFORGE_RELEVANCE_MAX_CANDIDATES": "4",
-        "BOARDFORGE_RELEVANCE_BATCH_SIZE": "4",
-        "BOARDFORGE_RELEVANCE_MAX_CALLS_PER_SEARCH": "1",
-        "BOARDFORGE_RELEVANCE_MAX_DESCRIPTION_CHARS": "4000",
-        "BOARDFORGE_AGENT_MAX_ITERATIONS": "3",
-        "BOARDFORGE_AGENT_MAX_TOOL_CALLS": "5",
-        "BOARDFORGE_AGENT_MIN_SUFFICIENT_RESULTS": "1",
-    })
+    os.environ.update(_live_environment_settings())
 
     store = PostgresStore(database_url)
     end_to_end_started = time.perf_counter()
@@ -180,6 +285,7 @@ async def run_live_agent_evaluation(
         allow_discovery=False, allow_sync=False,
     )
     provider = VertexGeminiLLMProvider()
+    _validate_live_provider(provider)
     provider.max_retries = 0
     agent = ToolCallingAgent(
         core, provider=provider, executor=executor, enabled=True,
@@ -187,7 +293,7 @@ async def run_live_agent_evaluation(
     agent.cumulative_cost_limit_usd = absolute_ceiling
 
     report: dict[str, Any] = {
-        "status": "incomplete", "scenario_version": "live-agent-smoke-v2",
+        "status": "incomplete", "scenario_version": "live-agent-smoke-v3-optimized",
         "labels": "not_a_ranking_holdout_evaluation",
         "profile_id": profile_id, "scenario": SCENARIO_TEXT,
         "authorized_incremental_cost_usd": max_incremental_cost_usd,
@@ -198,6 +304,7 @@ async def run_live_agent_evaluation(
             "location": provider.location, "max_retries": provider.max_retries,
         },
         "capabilities": {"discovery": False, "source_sync": False},
+        "warm_replay_requested": warm_replay,
         "profile_reused": reused_profile,
         "diagnostic_sql_preflight": {
             "status": "passed", "usage_rows_since_start": len(diagnostic_usage),
@@ -217,13 +324,74 @@ async def run_live_agent_evaluation(
             })
             _atomic_write(output_path, report)
 
+        primary_started = time.perf_counter()
         result = await agent.run(
             profile_id, SCENARIO_TEXT, event_sink=checkpoint,
+        )
+        primary_end_to_end_ms = round(
+            (time.perf_counter() - primary_started) * 1000, 2
         )
         # Persist the complete execution before any diagnostic post-processing.
         # A reporting query must never be able to erase the paid-call trace.
         report["execution"] = result
+        report["primary_end_to_end_ms"] = primary_end_to_end_ms
+        report["cache_after_primary"] = _cache_counts(store, embeddings.model)
         _atomic_write(output_path, report)
+
+        warm_result: dict[str, Any] | None = None
+        warm_end_to_end_ms: float | None = None
+        current_budget = store.usage_cost_summary()
+        spent_before_warm = (
+            current_budget["estimated_cost_usd"] - baseline["estimated_cost_usd"]
+        )
+        remaining_before_warm = max_incremental_cost_usd - spent_before_warm
+        warm_minimum_remaining = 0.006
+        report["warm_replay_admission"] = {
+            "requested": warm_replay,
+            "remaining_budget_usd": round(remaining_before_warm, 8),
+            "minimum_remaining_usd": warm_minimum_remaining,
+            "allowed": bool(
+                warm_replay and remaining_before_warm >= warm_minimum_remaining
+            ),
+        }
+        if warm_replay and remaining_before_warm >= warm_minimum_remaining:
+            report["warm_replay"] = {
+                "status": "running", "incremental_trace": [],
+                "budget_before": current_budget,
+                "cache_before": report["cache_after_primary"],
+            }
+            _atomic_write(output_path, report)
+
+            async def warm_checkpoint(event: dict[str, Any]) -> None:
+                report["warm_replay"]["incremental_trace"].append({
+                    **event, "budget_checkpoint": store.usage_cost_summary(),
+                    "elapsed_ms": round(
+                        (time.perf_counter() - end_to_end_started) * 1000, 2
+                    ),
+                })
+                _atomic_write(output_path, report)
+
+            warm_started = time.perf_counter()
+            warm_result = await agent.run(
+                profile_id, SCENARIO_TEXT, event_sink=warm_checkpoint,
+            )
+            warm_end_to_end_ms = round(
+                (time.perf_counter() - warm_started) * 1000, 2
+            )
+            report["warm_replay"].update({
+                "status": "complete",
+                "execution": warm_result,
+                "end_to_end_ms": warm_end_to_end_ms,
+                "cache_after": _cache_counts(store, embeddings.model),
+                "budget_after": store.usage_cost_summary(),
+            })
+            _atomic_write(output_path, report)
+        elif warm_replay:
+            report["warm_replay"] = {
+                "status": "skipped_insufficient_remaining_budget",
+                "incremental_trace": [],
+            }
+            _atomic_write(output_path, report)
         after_state = {
             "preferences": store.load_preferences(profile_id).model_dump(mode="json"),
             "profile": store.load_candidate_profile(profile_id).model_dump(mode="json"),
@@ -234,6 +402,7 @@ async def run_live_agent_evaluation(
             budget_after["estimated_cost_usd"] - baseline["estimated_cost_usd"]
         )
         usage_rows = _usage_rows(store, started_at)
+        cost_breakdown = _usage_cost_breakdown(usage_rows)
         tools = [item["tool"] for item in result.get("trace", []) if item.get("ok")]
         attempted_tools = [item["tool"] for item in result.get("trace", [])]
         duplicates = len(attempted_tools) - len(set(
@@ -294,12 +463,17 @@ async def run_live_agent_evaluation(
             len(result.get("events", [])) == len(report["incremental_trace"])
             and bool(report["incremental_trace"])
         )
+        execution_outcome = _execution_outcome(result)
+        valid_terminal = execution_outcome["successful_terminal"]
+        recommendation_checks = (
+            all((message_grounded, evidence_grounded, relevance_supported,
+                 constraints_satisfied))
+            if recommendations else True
+        )
         complete = all((
             read_then_search, no_forbidden_calls, constraints_preserved,
-            bool(recommendations), result["agent"]["sufficient_results"],
-            result["agent"]["stopped_reason"] == "sufficient_results",
-            message_grounded, evidence_grounded, relevance_supported,
-            constraints_satisfied, duplicates == 0, unnecessary_calls == 0,
+            valid_terminal, recommendation_checks,
+            duplicates == 0, unnecessary_calls == 0,
             trace_complete,
             incremental_cost <= max_incremental_cost_usd + 1e-12,
         ))
@@ -308,7 +482,9 @@ async def run_live_agent_evaluation(
             "assessment": {
                 "read_preferences_before_search": read_then_search,
                 "constraints_preserved": constraints_preserved,
-                "recommendation_constraints_satisfied": constraints_satisfied,
+                "recommendation_constraints_satisfied": (
+                    constraints_satisfied if recommendations else None
+                ),
                 "tool_selection_correct": (
                     read_then_search and no_forbidden_calls
                     and all(tool in allowed_tools for tool in attempted_tools)
@@ -317,12 +493,18 @@ async def run_live_agent_evaluation(
                 "duplicate_calls": duplicates,
                 "search_refinements": refinements,
                 "stopping_behavior_correct": (
-                    result["agent"]["stopped_reason"] == "sufficient_results"
+                    valid_terminal
                 ),
                 "grounded_final_recommendations": message_grounded,
                 "evidence_grounding_valid": evidence_grounded,
                 "final_recommendation_relevance_supported": relevance_supported,
                 "recommendation_count": len(recommendations),
+                "terminal_outcome": result["agent"]["stopped_reason"],
+                "execution_outcome": execution_outcome,
+                "no_suitable_jobs_not_provider_failure": (
+                    execution_outcome["classification"]
+                    == "no_suitable_indexed_jobs"
+                ),
                 "state_mutations_during_agent_turn": []
                 if constraints_preserved else ["isolated_user_state_changed"],
                 "native_function_calling_compatible": bool(
@@ -337,9 +519,17 @@ async def run_live_agent_evaluation(
             "usage_ledger_rows": usage_rows,
             "budget_after": budget_after,
             "incremental_cost_usd": round(incremental_cost, 8),
+            "incremental_provider_estimated_cost_usd": (
+                cost_breakdown["provider_estimated_cost_usd"]
+            ),
+            "incremental_conservative_accounted_cost_usd": (
+                cost_breakdown["conservative_accounted_cost_usd"]
+            ),
             "incremental_tokens": budget_after["total_tokens"] - baseline["total_tokens"],
             "latency_ms": {
                 "end_to_end": round((time.perf_counter() - end_to_end_started) * 1000, 2),
+                "primary_end_to_end": primary_end_to_end_ms,
+                "warm_replay_end_to_end": warm_end_to_end_ms,
                 "agent": result["agent"].get("latency_ms", {}),
                 "model_calls": [
                     row.get("latency_ms")
@@ -359,13 +549,21 @@ async def run_live_agent_evaluation(
         })
     except Exception as exc:
         budget_after = store.usage_cost_summary()
+        usage_rows = _usage_rows(store, started_at)
+        cost_breakdown = _usage_cost_breakdown(usage_rows)
         report.update({
             "status": "incomplete", "error": f"{type(exc).__name__}: {exc}",
             "budget_after": budget_after,
             "incremental_cost_usd": round(
                 budget_after["estimated_cost_usd"] - baseline["estimated_cost_usd"], 8
             ),
-            "usage_ledger_rows": _usage_rows(store, started_at),
+            "incremental_provider_estimated_cost_usd": (
+                cost_breakdown["provider_estimated_cost_usd"]
+            ),
+            "incremental_conservative_accounted_cost_usd": (
+                cost_breakdown["conservative_accounted_cost_usd"]
+            ),
+            "usage_ledger_rows": usage_rows,
         })
     finally:
         store.close()
@@ -379,7 +577,8 @@ def main() -> None:
     parser.add_argument("--database-url", required=True)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--profile-id", default="agent-live-eval-20261125")
-    parser.add_argument("--max-incremental-cost-usd", type=float, default=0.04)
+    parser.add_argument("--max-incremental-cost-usd", type=float, default=0.02)
+    parser.add_argument("--warm-replay", action="store_true")
     args = parser.parse_args()
     if not args.execute:
         raise SystemExit("refusing live evaluation without --execute")
@@ -387,6 +586,7 @@ def main() -> None:
         database_url=args.database_url, output_path=args.output,
         profile_id=args.profile_id,
         max_incremental_cost_usd=args.max_incremental_cost_usd,
+        warm_replay=args.warm_replay,
     ))
     print(json.dumps({
         "status": report["status"], "artifact": str(args.output),

@@ -1,4 +1,5 @@
 import asyncio
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -153,6 +154,36 @@ def test_vertex_provider_does_not_retry_nonretryable_failure(monkeypatch):
         asyncio.run(provider.generate(request()))
     assert caught.value.attempts == 1
     assert len(client.models.calls) == 1
+
+
+def test_vertex_request_failure_preserves_latency_and_safe_metadata(monkeypatch):
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "test-project")
+    monkeypatch.setenv("BOARDFORGE_RELEVANCE_MODEL", "gemini-test-flash")
+
+    class NotFoundError(RuntimeError):
+        status_code = 404
+
+    class DelayedModels(FakeModels):
+        async def generate_content(self, **kwargs):
+            time.sleep(0.01)
+            return await super().generate_content(**kwargs)
+
+    client = FakeClient([])
+    client.models = DelayedModels([NotFoundError("model unavailable")])
+    client.aio = SimpleNamespace(models=client.models)
+    provider = VertexGeminiLLMProvider(client=client)
+
+    with pytest.raises(LLMProviderError) as caught:
+        asyncio.run(provider.generate(request()))
+
+    assert caught.value.latency_ms >= 5
+    assert caught.value.response_metadata == {
+        "phase": "provider_request",
+        "exception_type": "NotFoundError",
+        "status_code": "404",
+        "model": "gemini-test-flash",
+        "location": "global",
+    }
 
 
 def test_vertex_max_tokens_is_explicit_and_preserves_usage(monkeypatch):

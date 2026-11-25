@@ -26,7 +26,7 @@ from boardforge.models import Job, Match, MatchEvidence, Preferences
 
 
 PROMPT_VERSION = "relevance-verifier-v3-evidence-refs"
-CACHE_FORMAT_VERSION = 2
+CACHE_FORMAT_VERSION = 3
 RelevanceLabel = Literal["direct", "adjacent", "irrelevant", "uncertain"]
 
 SYSTEM_PROMPT = (
@@ -57,7 +57,7 @@ class ProviderJudgment(BaseModel):
     candidate_ref: str = Field(validation_alias=AliasChoices("candidate_ref", "candidate_id"))
     relevance: RelevanceLabel
     evidence_ids: list[str] = Field(max_length=2)
-    reasoning: str = Field(min_length=1, max_length=160)
+    reasoning: str = Field(min_length=1)
 
 
 class ProviderJudgmentEnvelope(BaseModel):
@@ -379,6 +379,19 @@ _INJECTION_PATTERN = re.compile(
     r"return (?:this )?(?:candidate )?(?:as )?(?:direct|adjacent|irrelevant)|"
     r"follow these instructions?)\b", re.I,
 )
+_RESPONSIBILITY_PATTERN = re.compile(
+    r"\b(?:you will|you'll|responsib(?:le|ilities)|own|build|develop|design|"
+    r"implement|maintain|operate|deploy|lead|manage|support|negotiate|create|"
+    r"deliver|architect|investigate|analyze|optim(?:ize|ise))\b",
+    re.I,
+)
+_OPTIONAL_QUALIFICATION_PATTERN = re.compile(
+    r"\b(?:preferred|nice to have|bonus|optional|a plus|ideally)\b", re.I
+)
+_COMPANY_BOILERPLATE_PATTERN = re.compile(
+    r"\b(?:we|our company|the company)\s+(?:build|develop|design|create|deliver)s?\b",
+    re.I,
+)
 
 
 def evidence_segments(description: str, *, max_chars: int) -> list[dict[str, str]]:
@@ -411,13 +424,40 @@ def _meaningful_tokens(value: str) -> set[str]:
 
 
 def _evidence_is_supportive(
-    snippets: list[str], *, job: Job, intent: str, reasoning: str,
+    snippets: list[str], *, job: Job, intent: str, relevance: RelevanceLabel,
 ) -> bool:
-    usable = [text for text in snippets if not _INJECTION_PATTERN.search(text)]
+    usable = [
+        text for text in snippets
+        if not _INJECTION_PATTERN.search(text)
+        and not _OPTIONAL_QUALIFICATION_PATTERN.search(text)
+        and not _COMPANY_BOILERPLATE_PATTERN.search(text)
+    ]
     if not usable:
         return False
-    target = _meaningful_tokens(f"{intent} {job.title} {reasoning}")
-    return bool(target & _meaningful_tokens(" ".join(usable)))
+    if any(any(pattern.search(text) for pattern in _NO_VACANCY_PATTERNS)
+           for text in usable):
+        return relevance == "irrelevant"
+    substantive = [text for text in usable if _RESPONSIBILITY_PATTERN.search(text)]
+    if not substantive:
+        return False
+    if relevance in {"adjacent", "irrelevant"}:
+        return True
+    # Provider reasoning is an untrusted explanation, not source evidence. In
+    # particular, verbose reasoning must not manufacture lexical support for an
+    # otherwise unrelated evidence segment.
+    target = _meaningful_tokens(f"{intent} {job.title}")
+    return bool(target & _meaningful_tokens(" ".join(substantive)))
+
+
+def _resolved_reasoning(judgment: ProviderJudgment) -> str:
+    normalized = " ".join(judgment.reasoning.split())
+    if len(normalized) <= 160:
+        return normalized
+    evidence = ", ".join(judgment.evidence_ids) or "no evidence IDs"
+    return (
+        f"Provider classified this candidate as {judgment.relevance} using "
+        f"validated evidence {evidence}."
+    )[:160]
 
 
 def _confirmed_no_vacancy(job: Job) -> bool:
@@ -514,7 +554,7 @@ class RelevanceVerifier:
             relevance="uncertain",
             evidence_ids=[],
             evidence_snippets=[],
-            reasoning=reason[:500],
+            reasoning=reason[:160],
             evidence_validated=False,
         )
 
@@ -542,7 +582,7 @@ class RelevanceVerifier:
                 job.stable_id, "provider evidence reference was missing",
             )
         if requires_evidence and not _evidence_is_supportive(
-            evidence, job=job, intent=intent, reasoning=judgment.reasoning
+            evidence, job=job, intent=intent, relevance=judgment.relevance
         ):
             return self._fallback(
                 job.stable_id, "referenced evidence does not substantively support the judgment"
@@ -551,7 +591,7 @@ class RelevanceVerifier:
             candidate_id=job.stable_id,
             relevance=judgment.relevance,
             evidence_ids=judgment.evidence_ids,
-            reasoning=judgment.reasoning,
+            reasoning=_resolved_reasoning(judgment),
             evidence_snippets=evidence,
             evidence_validated=True,
         )
@@ -933,6 +973,7 @@ class RelevanceVerifier:
                 }
 
             resolved: dict[str, ResolvedJudgment] = {}
+            validation_failures = dict(invalid_by_id)
             for index, match in enumerate(batch, start=1):
                 candidate_id = match.job.stable_id
                 candidate_ref = f"C{index:03d}"
@@ -949,16 +990,24 @@ class RelevanceVerifier:
                         judgment = self._fallback(
                             candidate_id, "provider omitted candidate; verification required"
                         )
+                        validation_failures[candidate_ref] = judgment.reasoning
                 elif returned_ref in duplicates:
                     judgment = self._fallback(
                         candidate_id, "provider returned duplicate candidate judgments"
                     )
+                    validation_failures[candidate_ref] = judgment.reasoning
                 else:
                     judgment = self._validate_judgment(
                         item, match.job, intent,
                         description_chars=description_chars,
                         expected_ref=candidate_ref,
                     )
+                    if (
+                        item.relevance != "uncertain"
+                        and judgment.relevance == "uncertain"
+                        and not judgment.evidence_validated
+                    ):
+                        validation_failures[candidate_ref] = judgment.reasoning
                 resolved[candidate_id] = judgment
                 if judgment.relevance != "uncertain":
                     key = verification_cache_key(
@@ -977,7 +1026,7 @@ class RelevanceVerifier:
                 if isinstance(provider_result, LLMCallResult) else 0.0,
                 "response_metadata": provider_result.response_metadata
                 if isinstance(provider_result, LLMCallResult) else {},
-                "candidate_validation_failures": invalid_by_id,
+                "candidate_validation_failures": validation_failures,
             }
 
         model_started = time.perf_counter()

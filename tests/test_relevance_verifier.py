@@ -100,31 +100,141 @@ def test_invalid_relevance_literal_is_rejected_by_native_schema():
         }]})
 
 
-def test_one_invalid_candidate_does_not_discard_valid_batch_peers(tmp_path: Path):
+
+def test_overlong_reasoning_preserves_valid_judgment(tmp_path: Path):
+    store = Store(str(tmp_path / "verbose.db"))
+
+    candidate = job(
+        "verbose",
+        "Vision Engineer",
+        "Build computer vision perception systems for robots.",
+    )
+
+    provider = MockProvider([{"judgments": [{
+        "candidate_ref": "C001",
+        "relevance": "direct",
+        "evidence_ids": ["E001"],
+        "reasoning": (
+            "The role directly involves building computer vision "
+            "perception systems for robots, which aligns with the "
+            "requested computer vision engineering responsibilities "
+            "and the candidate's intended occupational family."
+        ),
+    }]}])
+
+    verifier = RelevanceVerifier(store, provider, enabled=True)
+
+    verified, meta = run(verifier, [match(candidate)])
+
+    assert verified[0].status == "recommended"
+    assert len(verified[0].reasons[-1]) <= 220
+    assert "validated evidence E001" in verified[0].reasons[-1]
+    assert meta["provider_failures"] == []
+    assert meta["candidate_validation_failures"] == {}
+
+    # Valid judgments should remain cacheable.
+    second, second_meta = run(verifier, [match(candidate)])
+
+    assert second[0].status == "recommended"
+    assert second_meta["cache_hits"] == 1
+    assert len(provider.calls) == 1
+
+
+def test_one_invalid_candidate_does_not_discard_valid_batch_peers(
+    tmp_path: Path,
+):
     store = Store(str(tmp_path / "partial-candidate.db"))
-    valid = job("valid", "Vision Engineer", "Build computer vision perception models.")
-    verbose = job("verbose", "Vision Engineer", "Build perception systems for robots.")
+
+    valid = job(
+        "valid",
+        "Vision Engineer",
+        "Build computer vision perception models.",
+    )
+
+    invalid = job(
+        "invalid",
+        "Vision Engineer",
+        "Build perception systems for robots.",
+    )
+
     provider = MockProvider([{"judgments": [
         {
-            "candidate_ref": "C001", "relevance": "direct",
-            "evidence_ids": ["E001"], "reasoning": "Direct perception responsibility.",
+            "candidate_ref": "C001",
+            "relevance": "direct",
+            "evidence_ids": ["E001"],
+            "reasoning": "Direct perception responsibility.",
         },
         {
-            "candidate_ref": "C002", "relevance": "direct",
-            "evidence_ids": ["E001"], "reasoning": "x" * 161,
+            "candidate_ref": "C002",
+            "relevance": "direct",
+            "evidence_ids": ["E999"],
+            "reasoning": "Direct perception responsibility.",
         },
     ]}])
+
     verified, meta = run(
-        RelevanceVerifier(store, provider, enabled=True, batch_size=2),
-        [match(valid), match(verbose)],
+        RelevanceVerifier(
+            store, provider, enabled=True, batch_size=2
+        ),
+        [match(valid), match(invalid)],
     )
+
     by_id = {item.job.external_id: item for item in verified}
+
     assert by_id["valid"].status == "recommended"
-    assert by_id["verbose"].status == "needs_verification"
+    assert by_id["invalid"].status == "needs_verification"
     assert meta["provider_failures"] == []
-    assert meta["candidate_validation_failures"]["C002"].startswith(
-        "provider candidate judgment failed validation"
+    assert meta["candidate_validation_failures"]["C002"] == (
+        "provider returned an invalid evidence ID"
     )
+
+
+def test_verbose_reasoning_cannot_ground_unrelated_evidence(tmp_path: Path):
+    store = Store(str(tmp_path / "reasoning-is-not-evidence.db"))
+    candidate = job(
+        "benefits", "Software Engineer",
+        "Employees receive health insurance and commuter benefits.",
+    )
+    provider = MockProvider([{"judgments": [{
+        "candidate_ref": "C001", "relevance": "direct",
+        "evidence_ids": ["E001"],
+        "reasoning": (
+            "Computer vision perception robotics responsibility direct " * 20
+        ),
+    }]}])
+
+    verified, meta = run(
+        RelevanceVerifier(store, provider, enabled=True), [match(candidate)],
+    )
+
+    assert verified[0].status == "needs_verification"
+    assert meta["candidate_validation_failures"]["C001"] == (
+        "referenced evidence does not substantively support the judgment"
+    )
+
+
+@pytest.mark.parametrize("description", [
+    "We build computer vision perception systems for autonomous robots.",
+    "Nice to have experience building computer vision perception systems.",
+])
+def test_boilerplate_or_optional_qualification_cannot_ground_direct_relevance(
+    tmp_path: Path, description: str,
+):
+    store = Store(str(tmp_path / "non-responsibility-evidence.db"))
+    candidate = job("incidental", "Software Engineer", description)
+    provider = MockProvider([{"judgments": [{
+        "candidate_ref": "C001", "relevance": "direct",
+        "evidence_ids": ["E001"],
+        "reasoning": "The text mentions the requested computer vision domain.",
+    }]}])
+
+    verified, meta = run(
+        RelevanceVerifier(store, provider, enabled=True), [match(candidate)],
+    )
+
+    assert verified[0].status == "needs_verification"
+    assert "C001" in meta["candidate_validation_failures"]
+
 
 
 def test_irrelevant_occupational_family_is_downgraded(tmp_path: Path):
@@ -349,7 +459,10 @@ def test_per_search_call_budget_fails_remaining_batches_closed(tmp_path: Path, m
     monkeypatch.setenv("BOARDFORGE_RELEVANCE_MAX_CALLS_PER_SEARCH", "1")
     store = Store(str(tmp_path / "call-budget.db"))
     matches = [
-        match(job(str(index), f"Engineer {index}", f"Build service {index}."))
+        match(job(
+            str(index), f"Vision Engineer {index}",
+            f"Build computer vision perception service {index}.",
+        ))
         for index in range(5)
     ]
     provider = MockProvider([{"judgments": [{

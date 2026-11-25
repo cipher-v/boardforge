@@ -81,6 +81,23 @@ def _retryable(exc: Exception) -> bool:
         return False
 
 
+def _failure_metadata(exc: Exception, *, phase: str, model: str, location: str) -> dict[str, Any]:
+    """Return bounded, credential-free diagnostics for a failed provider request."""
+    response = getattr(exc, "response", None)
+    status = (
+        getattr(exc, "status_code", None)
+        or getattr(exc, "code", None)
+        or getattr(response, "status_code", None)
+    )
+    return {
+        "phase": phase,
+        "exception_type": type(exc).__name__,
+        "status_code": str(status) if status is not None else "",
+        "model": model,
+        "location": location,
+    }
+
+
 class VertexGeminiLLMProvider:
     """Official Google Gen AI SDK adapter using Vertex AI and ADC."""
 
@@ -210,10 +227,16 @@ class VertexGeminiLLMProvider:
                     break
                 except Exception as exc:
                     if attempts > self.max_retries or not _retryable(exc):
+                        latency_ms = (time.perf_counter() - started) * 1000
                         raise LLMProviderError(
                             f"Vertex Gemini request failed after {attempts} attempt(s): "
                             f"{type(exc).__name__}: {exc}",
                             attempts=attempts,
+                            latency_ms=round(latency_ms, 2),
+                            response_metadata=_failure_metadata(
+                                exc, phase="provider_request", model=self.model,
+                                location=self.location,
+                            ),
                         ) from exc
                     delay = min(4.0, (0.4 * (2 ** (attempts - 1))))
                     await asyncio.sleep(delay + random.uniform(0, delay * 0.2))

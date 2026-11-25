@@ -9,6 +9,222 @@ explanation of why each change was made. It is not a changelog: routine file
 lists belong in Git history; this document records engineering evidence and
 trade-offs.
 
+## 2026-11-25 - v4 live-agent provider failure investigation
+
+### Root cause and artifact evidence
+
+No external request was made during this investigation. The preserved v4
+artifact shows that the runner constructed a `vertex-gemini` provider in
+`global` with model `openai/gpt-oss-120b`. Vertex returned an authenticated
+404 before inference: the publisher model
+`publishers/openai/models/gpt-oss-120b` was not found or accessible. The v3
+artifact used `vertex-gemini` with `gemini-3.8-flash` in the same project and
+location successfully. Both first planning reservations were identical (2,507
+tokens and $0.00418425), which also rules against a changed prompt or tool
+declaration as the cause of this pre-inference failure.
+
+The live runner forced `BOARDFORGE_RELEVANCE_PROVIDER=vertex` but did not force
+the corresponding model. The interactive PowerShell process had loaded the
+local `.env`, whose generic relevance-model setting belongs to the manually
+selectable Groq configuration. The earlier Codex process had not imported that
+setting and therefore used the Vertex adapter's Gemini default. This was a
+latent environment-coupling defect in the evaluation runner, exposed after the
+recent reliability work; it was not caused by candidate validation, agent
+finalization, or ranking changes. No search or verifier code ran. Authentication
+was not the failure, and request parsing, SDK response parsing, and native
+function declarations had not yet become relevant.
+
+The artifact contains the complete chained exception message and one failed
+ledger row, but no Python stack trace and no response metadata. Its provider
+trace records one attempt, zero input/output/thinking tokens, zero estimated
+provider cost, and zero reported inference latency. The ledger row retains the
+$0.00418425 reservation for a failed call by design: cumulative protection
+counts completed calls at estimated cost and all non-completed calls at their
+reserved cost. It is conservative budget accounting, not evidence of billable
+provider usage.
+
+### Corrections
+
+- The frozen live runner now explicitly pins the v3 provider/model pair
+  (`vertex-gemini` / `gemini-3.8-flash`) and validates it before an agent budget
+  reservation can be created. Shell and `.env` defaults can no longer silently
+  cross-wire a Groq model into Vertex.
+- Vertex request exceptions now preserve elapsed provider latency plus bounded,
+  credential-free phase, exception type, status, model, and location metadata.
+  This corrects the misleading zero-latency diagnostic. Full stack traces are
+  intentionally not serialized into durable artifacts; Python exception
+  chaining remains available to local logs/tests.
+- Live reports now distinguish token-based provider estimated cost from the
+  conservative ledger-accounted cost. Failed reservations remain retained, so
+  the safety budget is not weakened.
+- Regression tests cover shell-model contamination, failed-reservation cost
+  reporting, and request-failure latency/metadata.
+
+During full-suite verification, the first version of the shell-contamination
+test exposed its own process-environment leak: live shortlist limits remained
+set for later verifier batching tests. The configuration helper is now
+side-effect-free; only the actual runner applies the returned settings, and the
+test uses pytest-managed environment restoration.
+
+Verification completed with **42/42 focused provider and intelligent-agent
+tests**, **40/40 deterministic mocked-agent scenarios**, and **211/211 full
+tests**, including the isolated `boardforge_test` PostgreSQL/pgvector test. The
+only warning is the existing Starlette/httpx deprecation. `git diff --check`
+also passed.
+
+The root cause is fully established from existing evidence. A paid rerun is not
+needed to diagnose or validate this fix; any future live scenario should occur
+only when its product behavior—not this incident investigation—requires a
+separately authorized validation.
+
+## 2026-11-25 - Agent reliability closure after v3 review
+
+### Manual changes reviewed
+
+The manual verifier change was correct in its main design: provider reasoning is
+no longer rejected solely for exceeding 160 characters, while the resolved
+judgment still has a bounded explanation. Evidence IDs, relevance enums,
+candidate isolation, source-hash cache keys, deterministic eligibility, and
+exact source-segment resolution remain strict. The fallback cap was also
+correctly reduced from 500 to 160 characters.
+
+The manual agent finalization was likewise directionally correct. It preserved
+the real `iteration_limit`, constructed the final response deterministically,
+and did not spend another model call merely to summarize a completed turn. The
+partial `verification_incomplete` classification correctly considered provider
+candidate-validation failures and budget, deadline, and quota skips.
+
+### Bugs found and corrected
+
+1. `verification_incomplete` had no grounded-message branch. A fast-path search
+   could therefore carry the correct stop reason while telling the user that no
+   suitable jobs existed. Messages now independently report execution limits,
+   verification failures/incompleteness, and unresolved eligibility. An
+   iteration limit remains the actual stop reason even when the latest
+   verification outcome is incomplete.
+2. The evidence-support heuristic included provider reasoning tokens. Removing
+   the reasoning length cap made that unsafe: a verbose explanation could
+   manufacture lexical overlap for unrelated source evidence. Provider
+   reasoning is no longer evidence. Direct judgments require substantive
+   responsibility evidence that overlaps the source title or requested intent;
+   adjacent and irrelevant judgments require substantive duties. Instruction
+   text, benefits, optional qualifications, and company “we build” boilerplate
+   cannot establish direct relevance. Explicit no-vacancy evidence remains
+   valid for an irrelevant judgment.
+3. Prefix-truncating a long provider explanation could remove a later qualifier
+   and produce a misleading sentence. Full source/evidence validation now runs
+   first. If a valid explanation exceeds 160 characters, BoardForge stores a
+   deterministic statement of the validated relevance label and evidence IDs
+   rather than a partial provider sentence.
+4. Invalid evidence IDs, omitted candidates, duplicate candidate judgments, and
+   other candidate-local fallbacks were conservative in ranking but were not all
+   exposed in `candidate_validation_failures`. They are now observable, allowing
+   orchestration to distinguish incomplete verification from a genuine absence
+   of recommendations.
+5. A later incomplete refinement could overwrite a more useful earlier result.
+   Agent state now keeps the latest search for planning and a separate best
+   completed search for user-facing output. A verifier failure or empty partial
+   refinement cannot erase earlier viable candidates; the final message still
+   reports the latest incomplete outcome.
+6. The live runner previously had only a stop-reason check. It now classifies
+   verified recommendations, genuine empty results, no confident results,
+   unresolved eligibility, verification incompleteness, provider failures, and
+   execution limits separately. `verification_incomplete` cannot be counted as
+   a successful terminal, while an explicit, fully verified empty result can.
+7. One deadline regression used only a 100 ms scheduling margin and became
+   flaky under the complete suite. Its timing window was widened so it reliably
+   exercises a completed first search followed by a rejected refinement.
+
+Because validation semantics became stricter, the relevance cache format was
+bumped from version 2 to version 3. Judgments accepted under the old
+reasoning-assisted evidence heuristic will not be reused.
+
+### Verification
+
+- Focused relevance-verifier and intelligent-agent suite: **57 passed**.
+- Existing deterministic/mock agent evaluation: **40/40 exact sequences**;
+  precision, recall, and F1 all 1.0.
+- Complete suite with isolated `boardforge_test` PostgreSQL/pgvector enabled:
+  **208 passed** with one existing Starlette/httpx deprecation warning.
+- No provider call, live-agent rerun, embedding regeneration, discovery,
+  deployment, frozen-label change, or frontend work occurred.
+
+The backend milestone is ready for frontend integration subject to one final
+separately authorized smoke validation. Use a single cold/warm-explicit run,
+zero retries, the frozen `boardforge_holdout_eval` database and isolated profile,
+and a **$0.02 all-inclusive incremental ceiling**. Do not request a warm replay
+in the same command: v3 query vectors can be reused, but relevance cache version
+3 intentionally starts cold after the validation-policy change.
+
+## 2026-11-25 - Final optimized hybrid-agent live validation
+
+### Preflight and authorization
+
+The complete suite passed 198 tests, including the isolated PostgreSQL/pgvector
+integration test. The first database diagnostic deliberately blocked execution:
+the default local `boardforge` database contained only four jobs and was not the
+frozen evaluation corpus. No paid call had occurred. The local database catalog
+was inspected and `boardforge_holdout_eval` was identified by the exact prior
+state: 100 active jobs, the isolated `agent-live-eval-20261125` profile, 100
+compatible document embeddings, and the previous $0.01491375 usage baseline.
+
+The v1 and v2 artifacts were preserved. The new trace was written incrementally
+to `results/agent-live-smoke-vertex-v3.json`. The $0.02 incremental authorization
+created an absolute ledger ceiling of $0.03491375. Agent, verifier, and embedding
+retries were all zero; discovery, source synchronization, and document backfill
+were disabled.
+
+### Result
+
+The primary execution completed in **33.19 seconds**, versus 45.11 seconds in
+the previous run (11.92 seconds / 26.4% faster). Authenticated context loaded
+locally in **3.43 ms**, replacing the previous 22.19-second context-read model
+decision. The primary search fell from 13.15 seconds to **8.01 seconds**, and two
+conditional refinements that previously could not finish completed in 4.79 and
+4.37 seconds.
+
+The result remains honestly classified **incomplete**, but not because of a
+provider or tool failure. Gemini used all three allowed planning iterations to
+issue materially different indexed searches, so the turn ended at
+`iteration_limit` without an explicit terminal decision. All searches completed,
+there were no duplicates or unnecessary calls, and the final five uncertain
+results were preserved.
+
+### Calls, caches, and cost
+
+- Agent Gemini: 3 calls; 6,551 input, 244 output, 666 thinking tokens;
+  $0.00832575.
+- Verifier Gemini: 3 calls; 6,159 input and 317 output tokens; $0.00580800.
+- Vertex query embeddings: 3 calls, 122 tokens; $0.00001830.
+- Total: **14,059 tokens and $0.01415205**, with zero retries and zero provider
+  failures. $0.00584795 of the authorization remained.
+- All 100 document embeddings were reused. The three distinct search queries
+  were query-cache misses and were persisted. Relevance cache hits were zero.
+- Each verifier response failed only the individual candidate reasoning-length
+  limit (`too_long`). Candidate-isolated validation preserved the batch and
+  conservatively returned `uncertain`; invalid judgments were not cached.
+- A warm replay was requested but correctly skipped because the remaining
+  $0.00584795 was below the declared $0.006 safe admission floor. No warm result
+  is mislabeled as a cold benchmark, and no additional paid request was made.
+
+### Correctness
+
+Tool selection was correct and limited to indexed search. The profile,
+preferences, and feedback were unchanged. Known five-year requirements remained
+within the saved ceiling, while unknown experience eligibility stayed visibly
+unverified and was never overridden. No hard constraint or rejected-memory rule
+was violated. There were zero verified recommendations and zero alternatives;
+therefore recommendation evidence grounding is not claimed. This may reflect a
+genuine corpus gap, but the agent did not reach a conclusive no-suitable-jobs
+terminal state.
+
+The readable comparison is
+`results/agent-live-smoke-vertex-v3-report.md`. The next engineering work should
+reserve a final decision after bounded refinements and align the verifier's live
+reasoning output with candidate-level limits without weakening evidence or
+eligibility validation. No further live evaluation should be run until those
+changes are implemented and separately authorized.
+
 ## 2026-11-25 - Hybrid agent orchestration and deadline admission
 
 ### Why this milestone was needed

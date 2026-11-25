@@ -11,9 +11,12 @@ from boardforge.agent_eval import (
 from boardforge.agent_tools import AgentExecutionState, AgentToolExecutor
 from boardforge.intelligent_agent import ToolCallingAgent
 from boardforge.agent_live_eval import (
-    _atomic_write, _refinement_assessment, run_live_agent_evaluation,
+    LIVE_VERTEX_MODEL, _atomic_write, _live_environment_settings,
+    _execution_outcome, _refinement_assessment, _usage_cost_breakdown,
+    _validate_live_provider,
+    run_live_agent_evaluation,
 )
-from boardforge.llm import LLMCallResult, TokenUsage
+from boardforge.llm import LLMCallResult, TokenUsage, VertexGeminiLLMProvider
 from boardforge.models import FeedbackRequest, Preferences
 from boardforge.store import Store
 
@@ -174,7 +177,7 @@ def test_expensive_refinement_is_not_started_when_time_is_insufficient(tmp_path)
     class DelayedProvider(ScriptedProvider):
         async def generate(self, request):
             if self.calls == 1:
-                await asyncio.sleep(0.25)
+                await asyncio.sleep(1.2)
             return await super().generate(request)
 
     arguments = dict(
@@ -189,9 +192,9 @@ def test_expensive_refinement_is_not_started_when_time_is_insufficient(tmp_path)
         core, provider=provider,
         executor=AgentToolExecutor(core, min_sufficient_results=1), enabled=True,
     )
-    agent.timeout_seconds = 2.0
-    agent.total_timeout_seconds = 2.0
-    agent.minimum_expensive_tool_seconds = 1.9
+    agent.timeout_seconds = 3.0
+    agent.total_timeout_seconds = 3.0
+    agent.minimum_expensive_tool_seconds = 2.0
     result = asyncio.run(agent.run(
         "u", "Find backend; if insufficient, refine toward cloud backend",
     ))
@@ -423,12 +426,38 @@ def test_frozen_mock_scenario_manifest_covers_requested_cases():
 
 
 def test_live_runner_rejects_budget_above_authorization(tmp_path):
-    with pytest.raises(ValueError, match="at most \\$0.04"):
+    with pytest.raises(ValueError, match="at most \\$0.02"):
         asyncio.run(run_live_agent_evaluation(
             database_url="postgresql://unused",
             output_path=tmp_path / "must-not-exist.json",
-            profile_id="u", max_incremental_cost_usd=0.041,
+            profile_id="u", max_incremental_cost_usd=0.021,
         ))
+
+
+def test_live_runner_pins_vertex_model_over_shell_defaults(monkeypatch):
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "test-project")
+    monkeypatch.setenv("BOARDFORGE_RELEVANCE_PROVIDER", "groq")
+    monkeypatch.setenv("BOARDFORGE_RELEVANCE_MODEL", "openai/gpt-oss-120b")
+
+    settings = _live_environment_settings()
+    for name, value in settings.items():
+        monkeypatch.setenv(name, value)
+    provider = VertexGeminiLLMProvider(client=object())
+    _validate_live_provider(provider)
+
+    assert provider.provider_name == "vertex-gemini"
+    assert provider.model == LIVE_VERTEX_MODEL
+
+
+def test_usage_breakdown_distinguishes_failed_reservation_from_provider_usage():
+    breakdown = _usage_cost_breakdown([{
+        "status": "failed", "reserved_cost_usd": 0.00418425,
+        "estimated_cost_usd": 0.0,
+    }])
+    assert breakdown == {
+        "provider_estimated_cost_usd": 0.0,
+        "conservative_accounted_cost_usd": 0.00418425,
+    }
 
 
 def test_live_artifact_write_is_atomic_and_refinements_are_classified(tmp_path):
@@ -443,3 +472,245 @@ def test_live_artifact_write_is_atomic_and_refinements_are_classified(tmp_path):
     ])
     assert rows[1]["justified"] is True
     assert rows[2]["justified"] is False
+
+
+def test_iteration_limit_returns_grounded_final_response(tmp_path):
+    store = Store(str(tmp_path / "iteration-limit.db"))
+    core = FixtureCore(store, recommended=0)
+
+    arguments = dict(
+        top_k=10,
+        mandatory_constraints=[],
+        soft_preferences=[],
+        conditional_alternatives=[],
+    )
+
+    provider = ScriptedProvider([
+        {"function_calls": [
+            call("search_indexed_jobs", query="backend", **arguments)
+        ]},
+        {"function_calls": [
+            call("search_indexed_jobs", query="cloud backend", **arguments)
+        ]},
+    ])
+
+    agent = ToolCallingAgent(
+        core,
+        provider=provider,
+        executor=AgentToolExecutor(
+            core, min_sufficient_results=1
+        ),
+        enabled=True,
+    )
+
+    agent.max_iterations = 2
+
+    result = asyncio.run(agent.run(
+        "u",
+        "Find backend jobs; if insufficient, search cloud backend",
+    ))
+
+    assert result["agent"]["stopped_reason"] == "iteration_limit"
+    assert result["agent"]["provider_calls"] == 2
+    assert len(result["trace"]) == 2
+    assert "search limit" in result["message"].lower()
+    assert "no verified" in result["message"].lower()
+
+
+def test_candidate_validation_failure_is_not_no_jobs(tmp_path):
+    store = Store(str(tmp_path / "verification-failure.db"))
+
+    class InvalidVerificationCore(FixtureCore):
+        async def search_jobs(self, *args, **kwargs):
+            return AgentResult("searched", {
+                "matches": [],
+                "retrieval": {
+                    "verification": {
+                        "provider_failures": [],
+                        "candidate_validation_failures": {
+                            "C001": "invalid candidate judgment"
+                        },
+                    }
+                },
+            })
+
+    core = InvalidVerificationCore(store, recommended=0)
+    provider = ScriptedProvider([])
+
+    agent = ToolCallingAgent(
+        core,
+        provider=provider,
+        executor=AgentToolExecutor(
+            core, min_sufficient_results=1
+        ),
+        enabled=True,
+    )
+
+    result = asyncio.run(
+        agent.run("u", "Find backend jobs")
+    )
+
+    assert result["agent"]["stopped_reason"] == (
+        "verification_incomplete"
+    )
+
+    assert "verification" in result["message"].lower()
+    assert "incomplete" in result["message"].lower()
+    assert provider.calls == 0
+
+
+def test_iteration_limit_reports_incomplete_verification_and_preserves_better_result(
+    tmp_path,
+):
+    store = Store(str(tmp_path / "preserve-best.db"))
+
+    class RefinementCore(FixtureCore):
+        def __init__(self, value):
+            super().__init__(value, recommended=0)
+            self.calls = 0
+
+        async def search_jobs(self, *args, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                return AgentResult("searched", {
+                    "matches": [{
+                        "job": {
+                            "source_kind": "test", "source_key": "agent",
+                            "external_id": "earlier", "title": "Backend Engineer",
+                            "company": "Example", "location": "USA",
+                        },
+                        "status": "needs_verification", "score": 1.0,
+                        "reasons": ["plausible backend role"], "risks": [],
+                        "evidence": [],
+                    }],
+                    "retrieval": {"verification": {
+                        "provider_failures": [],
+                        "candidate_validation_failures": {},
+                    }},
+                })
+            return AgentResult("searched", {
+                "matches": [],
+                "retrieval": {"verification": {
+                    "provider_failures": [],
+                    "candidate_validation_failures": {
+                        "C001": "invalid evidence reference",
+                    },
+                }},
+            })
+
+    core = RefinementCore(store)
+    arguments = dict(
+        top_k=10, mandatory_constraints=[], soft_preferences=[],
+        conditional_alternatives=[],
+    )
+    provider = ScriptedProvider([
+        {"function_calls": [call(
+            "search_indexed_jobs", query="backend", **arguments,
+        )]},
+        {"function_calls": [call(
+            "search_indexed_jobs", query="cloud backend", **arguments,
+        )]},
+    ])
+    agent = ToolCallingAgent(
+        core, provider=provider,
+        executor=AgentToolExecutor(core, min_sufficient_results=1), enabled=True,
+    )
+    agent.max_iterations = 2
+
+    result = asyncio.run(agent.run(
+        "u", "Find backend jobs; if insufficient, search cloud backend",
+    ))
+
+    assert result["agent"]["stopped_reason"] == "iteration_limit"
+    assert result["agent"]["verification_outcome"] == "verification_incomplete"
+    assert [item["stable_id"] for item in result["matches"]] == [
+        "test:agent:earlier"
+    ]
+    assert "search limit" in result["message"].lower()
+    assert "verification was incomplete" in result["message"].lower()
+    assert provider.calls == 2
+
+
+def test_unknown_eligibility_is_explicit_in_final_message(tmp_path):
+    store = Store(str(tmp_path / "unknown-eligibility.db"))
+
+    class UnknownEligibilityCore(FixtureCore):
+        async def search_jobs(self, *args, **kwargs):
+            return AgentResult("searched", {
+                "matches": [{
+                    "job": {
+                        "source_kind": "test", "source_key": "agent",
+                        "external_id": "unknown", "title": "Backend Engineer",
+                        "company": "Example", "location": "USA",
+                    },
+                    "status": "needs_verification", "score": 1.0,
+                    "reasons": [],
+                    "risks": [
+                        "deterministic restriction cannot be overridden: "
+                        "experience_eligibility_unknown"
+                    ],
+                    "evidence": [],
+                }],
+                "retrieval": {"verification": {
+                    "provider_failures": [],
+                    "candidate_validation_failures": {},
+                }},
+            })
+
+    core = UnknownEligibilityCore(store, recommended=0)
+    agent = ToolCallingAgent(
+        core, provider=ScriptedProvider([]),
+        executor=AgentToolExecutor(core, min_sufficient_results=1), enabled=True,
+    )
+    result = asyncio.run(agent.run("u", "Find backend jobs"))
+
+    assert result["agent"]["stopped_reason"] == "no_verified_recommendations"
+    assert "unresolved eligibility" in result["message"].lower()
+
+
+def test_verification_provider_failure_is_not_reported_as_no_jobs(tmp_path):
+    store = Store(str(tmp_path / "verification-provider-failure.db"))
+
+    class FailedVerifierCore(FixtureCore):
+        async def search_jobs(self, *args, **kwargs):
+            return AgentResult("searched", {
+                "matches": [],
+                "retrieval": {"verification": {
+                    "provider_failures": ["TimeoutError: verifier unavailable"],
+                    "candidate_validation_failures": {},
+                }},
+            })
+
+    core = FailedVerifierCore(store, recommended=0)
+    agent = ToolCallingAgent(
+        core, provider=ScriptedProvider([]),
+        executor=AgentToolExecutor(core, min_sufficient_results=1), enabled=True,
+    )
+    result = asyncio.run(agent.run("u", "Find backend jobs"))
+
+    assert result["agent"]["stopped_reason"] == "verification_provider_failure"
+    assert "verifier could not complete" in result["message"].lower()
+    assert "no suitable indexed jobs" not in result["message"].lower()
+
+
+def test_live_outcome_classification_distinguishes_absence_and_incompleteness():
+    empty = _execution_outcome({
+        "matches": [],
+        "agent": {
+            "stopped_reason": "no_verified_recommendations",
+            "verification_outcome": "no_verified_recommendations",
+        },
+    })
+    incomplete = _execution_outcome({
+        "matches": [],
+        "agent": {
+            "stopped_reason": "iteration_limit",
+            "verification_outcome": "verification_incomplete",
+        },
+    })
+
+    assert empty["classification"] == "no_suitable_indexed_jobs"
+    assert empty["successful_terminal"] is True
+    assert incomplete["classification"] == "verification_incomplete"
+    assert incomplete["successful_terminal"] is False
+    assert incomplete["execution_complete"] is False

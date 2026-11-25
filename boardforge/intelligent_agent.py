@@ -192,18 +192,111 @@ class ToolCallingAgent:
 
     @staticmethod
     def _grounded_message(state: AgentExecutionState) -> str:
-        if state.last_search:
-            matches = state.last_search["matches"]
-            recommended = [item for item in matches if item["status"] == "recommended"]
-            if recommended:
-                names = ", ".join(
-                    f"{item['title']} at {item['company']}" for item in recommended[:3]
+        display_search = state.best_search or state.last_search
+        matches = (
+            display_search["matches"]
+            if display_search else []
+        )
+        verification_outcome = (
+            state.last_search.get("result_state")
+            if state.last_search else None
+        )
+
+        recommended = [
+            item for item in matches
+            if item["status"] == "recommended"
+        ]
+
+        stop_messages = {
+            "iteration_limit": "The search limit was reached.",
+            "tool_call_limit": "The tool-call limit was reached.",
+            "total_timeout": "The search time limit was reached.",
+            "tool_timeout": "A search operation timed out.",
+            "insufficient_remaining_time": (
+                "There was insufficient time for further searches."
+            ),
+            "token_limit": "The processing token limit was reached.",
+            "provider_failure": "The AI provider could not complete the request.",
+            "verification_provider_failure": (
+                "The relevance verifier could not complete verification."
+            ),
+            "verification_incomplete": "Relevance verification was incomplete.",
+        }
+
+        notices = []
+        stop_notice = stop_messages.get(state.stopped_reason, "")
+        if stop_notice:
+            notices.append(stop_notice)
+
+        if state.stopped_reason.startswith("budget_"):
+            notices.append("The processing budget limit was reached.")
+
+        outcome_notices = {
+            "verification_provider_failure": (
+                "The relevance verifier could not complete verification."
+            ),
+            "verification_incomplete": "Relevance verification was incomplete.",
+        }
+        outcome_notice = outcome_notices.get(verification_outcome)
+        if outcome_notice and outcome_notice not in notices:
+            notices.append(outcome_notice)
+
+        unknown_eligibility = any(
+            any(
+                marker in str(risk).casefold()
+                for marker in (
+                    "eligibility_unknown",
+                    "experience requirement not verified",
+                    "salary eligibility",
                 )
-                return f"Found {len(recommended)} verified recommendation(s): {names}."
-            if matches:
-                return f"Found {len(matches)} possible result(s), but none is verified yet."
-            return "No suitable indexed jobs were found."
-        return "Your job-search state was updated safely."
+            )
+            for item in matches
+            for risk in item.get("risks", [])
+        )
+        if unknown_eligibility:
+            notices.append("Some candidates have unresolved eligibility.")
+
+        if recommended:
+            names = ", ".join(
+                f"{item['title']} at {item['company']}"
+                for item in recommended[:3]
+            )
+
+            message = (
+                f"Found {len(recommended)} verified "
+                f"recommendation(s): {names}."
+            )
+
+        elif matches and verification_outcome == "verification_incomplete":
+            message = (
+                f"Preserved {len(matches)} possible result(s), but their "
+                "relevance is not fully verified."
+            )
+
+        elif matches:
+            message = (
+                f"Found {len(matches)} possible result(s), "
+                "but no verified recommendations."
+            )
+
+        elif verification_outcome == "verification_incomplete":
+            message = "No candidates could be fully verified."
+
+        elif notices:
+            message = (
+                "No verified recommendations were found "
+                "in the completed searches."
+                if state.last_search
+                else "No search results are available."
+            )
+
+        elif state.last_search:
+            message = "No suitable indexed jobs were found."
+
+        else:
+            message = "No job-search results are available."
+
+        return " ".join([*dict.fromkeys(notices), message]).strip()
 
     @staticmethod
     def _is_straightforward_search(text: str) -> bool:
@@ -270,6 +363,9 @@ class ToolCallingAgent:
                 "discovery_requested": state.discovery_requested,
                 "sufficient_results": state.sufficient_results,
                 "stopped_reason": state.stopped_reason,
+                "best_match_count": len(
+                    (state.best_search or {}).get("matches", [])
+                ),
             }
 
         tool_results: list[dict[str, Any]] = []
@@ -319,6 +415,8 @@ class ToolCallingAgent:
                 state.stopped_reason = "sufficient_results"
             elif result.get("result_state") == "verification_provider_failure":
                 state.stopped_reason = "verification_provider_failure"
+            elif result.get("result_state") == "verification_incomplete":
+                state.stopped_reason = "verification_incomplete"
             else:
                 state.stopped_reason = "no_verified_recommendations"
             await emit({
@@ -339,7 +437,10 @@ class ToolCallingAgent:
             return {
                 "mode": "intelligent-agent", "message": self._grounded_message(state),
                 "trace": state.trace, "tool_results": tool_results, "events": events,
-                "matches": state.last_search["matches"] if state.last_search else [],
+                "matches": (
+                    (state.best_search or state.last_search)["matches"]
+                    if (state.best_search or state.last_search) else []
+                ),
                 "agent": {
                     "prompt_version": AGENT_PROMPT_VERSION,
                     "orchestration_mode": "deterministic_fast_path",
@@ -348,6 +449,10 @@ class ToolCallingAgent:
                     "attempted_tool_calls": attempted_tools,
                     "successful_tool_calls": state.tool_calls,
                     "stopped_reason": state.stopped_reason,
+                    "verification_outcome": (
+                        state.last_search.get("result_state")
+                        if state.last_search else None
+                    ),
                     "provider_failure": None, "token_usage": usage.model_dump(),
                     "estimated_cost_usd": 0.0, "total_latency_ms": total_ms,
                     "latency_ms": {
@@ -492,8 +597,11 @@ class ToolCallingAgent:
                 if state.last_search and not state.recommended_count:
                     result_state = state.last_search.get("result_state")
                     state.stopped_reason = (
-                        "verification_provider_failure"
-                        if result_state == "verification_provider_failure"
+                        result_state
+                        if result_state in {
+                            "verification_provider_failure",
+                            "verification_incomplete",
+                        }
                         else "no_verified_recommendations"
                     )
                 else:
@@ -523,7 +631,9 @@ class ToolCallingAgent:
                         "error": "insufficient_remaining_time_for_expensive_tool",
                         "remaining_seconds": round(remaining_seconds, 3),
                         "required_seconds": self.minimum_expensive_tool_seconds,
-                        "partial_results_preserved": state.last_search is not None,
+                        "partial_results_preserved": (
+                            state.best_search is not None or state.last_search is not None
+                        ),
                     }
                     state.stopped_reason = "insufficient_remaining_time"
                 else:
@@ -574,7 +684,10 @@ class ToolCallingAgent:
             "trace": state.trace,
             "tool_results": tool_results,
             "events": events,
-            "matches": state.last_search["matches"] if state.last_search else [],
+            "matches": (
+                (state.best_search or state.last_search)["matches"]
+                if (state.best_search or state.last_search) else []
+            ),
             "agent": {
                 "prompt_version": AGENT_PROMPT_VERSION,
                 "orchestration_mode": "llm_conditional",
@@ -584,6 +697,10 @@ class ToolCallingAgent:
                 "attempted_tool_calls": attempted_tools,
                 "successful_tool_calls": state.tool_calls,
                 "stopped_reason": state.stopped_reason,
+                "verification_outcome": (
+                    state.last_search.get("result_state")
+                    if state.last_search else None
+                ),
                 "provider_failure": failure, "token_usage": usage.model_dump(),
                 "estimated_cost_usd": round(estimated_cost, 8),
                 "total_latency_ms": round((time.perf_counter() - started) * 1000, 2),
