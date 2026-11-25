@@ -54,6 +54,39 @@ def _reconcile(preferences: Preferences) -> Preferences:
     return preferences
 
 
+_NUMBER_WORDS = {"zero": 0, "one": 1, "two": 2, "three": 3, "four": 4,
+                 "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
+_NUMBER = r"(?:\d+(?:\.\d+)?|" + "|".join(_NUMBER_WORDS) + r")"
+EXPERIENCE_CAP_RE = re.compile(
+    r"\b(?:up to|at most|maximum(?: of)?|max(?:imum)?(?: required)?(?: experience)?\s*:?|"
+    r"no more than|not more than|no greater than|not over|more than|over|above|greater than)"
+    r"\s*(" + _NUMBER + r")\s*(?:years?|yrs?)\b(?:\s+of experience)?", re.I
+)
+
+
+def extract_experience_cap(text: str) -> float | None:
+    values = []
+    for match in EXPERIENCE_CAP_RE.finditer(text):
+        value = match.group(1).casefold()
+        values.append(float(_NUMBER_WORDS[value]) if value in _NUMBER_WORDS else float(value))
+    return min(values) if values else None
+
+
+def preserve_search_constraints(saved: Preferences, original: str, refined: Preferences) -> Preferences:
+    """Do not let agent rewrites relax the original turn's country or experience limits."""
+    base = effective_search_preferences(saved, original)
+    result = refined.model_copy(deep=True)
+    if base.countries:
+        result.countries = list(base.countries)
+    if base.max_required_experience_years is not None:
+        cap = result.max_required_experience_years
+        result.max_required_experience_years = (
+            base.max_required_experience_years if cap is None else
+            min(base.max_required_experience_years, cap)
+        )
+    return result
+
+
 def deterministic_extract(text: str, current: Preferences | None = None) -> Preferences:
     p = (current or Preferences()).model_copy(deep=True)
     low = text.lower()
@@ -80,9 +113,10 @@ def deterministic_extract(text: str, current: Preferences | None = None) -> Pref
     if m:
         p.min_salary_lpa = float(m.group(1))
 
-    m = re.search(r"(?:more than|over|above|greater than)\s*(\d+(?:\.\d+)?)\s*(?:years?|yrs?)", low)
-    if m:
-        p.max_required_experience_years = float(m.group(1))
+    # Recognize explicit caps, including ordinary number words.
+    caps = extract_experience_cap(low)
+    if caps is not None:
+        p.max_required_experience_years = caps
 
     if (
         any(x in low for x in ["no unpaid", "paid only", "only paid", "unpaid internship", "unpaid internships"])
