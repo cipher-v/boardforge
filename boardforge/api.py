@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, HttpUrl
 
 from boardforge.agent import JobAgent
-from boardforge.auth import authorize_admin, authorize_any_profile, authorize_profile
+from boardforge.auth import auth_required, authorize_admin, authorize_any_profile, authorize_profile, session_profile
 from boardforge.connectors.detect import detect_source
 from boardforge.database import create_store
 from boardforge.discovery import queue_discovery, run_discovery_request
@@ -57,6 +57,11 @@ def health():
     }
 
 
+@app.get("/session")
+def session(request: Request):
+    return {"profile_id": session_profile(request), "auth_required": auth_required()}
+
+
 @app.get("/ready")
 def ready():
     if not store.ping():
@@ -76,7 +81,8 @@ def ready():
 
 
 @app.get("/metrics", include_in_schema=False)
-def metrics():
+def metrics(request: Request):
+    authorize_admin(request)
     return metrics_response()
 
 
@@ -136,6 +142,7 @@ async def upload_resume(
     background_tasks: BackgroundTasks,
     profile_id: str = "default",
     filename: str = "resume.pdf",
+    recommend: bool = True,
 ):
     authorize_profile(request, profile_id)
     data = await _read_limited_body(request, 5 * 1024 * 1024)
@@ -149,6 +156,8 @@ async def upload_resume(
     if not profile.skills and not profile.role_signals and not profile.education:
         raise HTTPException(status_code=400, detail="could not extract a useful profile from this resume")
     store.save_candidate_profile(profile_id, profile)
+    if not recommend:
+        return {"profile": profile.model_dump(), "matches": []}
     recommendations = await core_agent.recommend_jobs(profile_id, 15)
     return {
         "profile": profile.model_dump(),
@@ -215,10 +224,12 @@ async def discover(
 @app.get("/discovery/{request_id}")
 def discovery_status(request_id: int, request: Request):
     authorize_any_profile(request)
-    request = store.discovery_request(request_id)
-    if request is None:
+    record = store.discovery_request(request_id)
+    if record is None:
         raise HTTPException(status_code=404, detail="discovery request not found")
-    return request
+    if auth_required() and record.get("profile_id") != session_profile(request):
+        raise HTTPException(status_code=404, detail="discovery request not found")
+    return record
 
 
 @app.get("/sources")
