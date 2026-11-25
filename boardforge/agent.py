@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from boardforge.models import FeedbackRequest
 from boardforge.database import StoreProtocol
 from boardforge.planning import plan_tools
-from boardforge.preferences import LLMPreferenceExtractor, effective_search_preferences
+from boardforge.preferences import LLMPreferenceExtractor, effective_search_preferences, preserve_search_constraints
 from boardforge.resume import apply_candidate_context
 from boardforge.relevance import RelevanceVerifier
 from boardforge.semantic import EmbeddingClient, retrieve_and_rank_jobs
@@ -43,10 +43,12 @@ class JobAgent:
 
     async def search_jobs(
         self, profile_id: str, query: str = "", top_k: int = 10,
-        *, deadline_monotonic: float | None = None,
+        *, deadline_monotonic: float | None = None, original_query: str | None = None,
     ) -> AgentResult:
         saved = self.store.load_preferences(profile_id)
         prefs = effective_search_preferences(saved, query) if query else saved
+        if original_query is not None:
+            prefs = preserve_search_constraints(saved, original_query, prefs)
         candidate_profile = self.store.load_candidate_profile(profile_id)
         if candidate_profile:
             prefs = apply_candidate_context(prefs, candidate_profile)
