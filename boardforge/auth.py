@@ -22,9 +22,22 @@ def _profile_tokens() -> dict[str, str]:
     return value
 
 
+def auth_required() -> bool:
+    return bool(os.getenv("K_SERVICE") or os.getenv("BOARDFORGE_REQUIRE_AUTH") == "1" or _profile_tokens())
+
+
+def session_profile(request: Request) -> str:
+    if not auth_required():
+        return "local-demo"
+    owner = _profile_tokens().get(_bearer_token(request))
+    if not owner:
+        raise HTTPException(status_code=401, detail="valid invite token required")
+    return owner
+
+
 def authorize_profile(request: Request, profile_id: str) -> None:
     tokens = _profile_tokens()
-    if not tokens:
+    if not auth_required():
         return
     owner = tokens.get(_bearer_token(request))
     if owner is None:
@@ -35,13 +48,15 @@ def authorize_profile(request: Request, profile_id: str) -> None:
 
 def authorize_any_profile(request: Request) -> None:
     tokens = _profile_tokens()
-    if tokens and _bearer_token(request) not in tokens:
+    if auth_required() and _bearer_token(request) not in tokens:
         raise HTTPException(status_code=401, detail="valid bearer token required")
 
 
 def authorize_admin(request: Request) -> None:
     expected = os.getenv("BOARDFORGE_ADMIN_TOKEN", "")
     if not expected:
+        if auth_required():
+            raise HTTPException(status_code=403, detail="admin access disabled")
         return
     supplied = _bearer_token(request)
     if not supplied or not secrets.compare_digest(supplied, expected):
