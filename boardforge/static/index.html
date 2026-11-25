@@ -74,15 +74,16 @@ details.advanced{margin:0;padding:0;border:0}details.advanced>summary{font-size:
 button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 @media(max-width:800px){main{padding:28px 16px 50px}.workspace{grid-template-columns:1fr;gap:24px}.sidebar{grid-row:2}.workspace-main{grid-row:1}.search-actions{flex-wrap:wrap}.searchbtn{width:auto}.jobhead{flex-direction:column}.details{grid-template-columns:1fr}}
 
+.access-panel{max-width:440px;margin:36px auto;padding:24px;border:1px solid var(--line);background:white;border-radius:12px}.access-panel input{display:block;width:100%;padding:12px;margin:12px 0;border:1px solid var(--line);border-radius:8px}.access-panel[hidden],main[hidden],#signOut[hidden],#sourceAdmin[hidden]{display:none}.access-panel h2{font-family:Georgia,serif;font-weight:normal}
 </style>
 </head>
 <body>
 <header>
   <div class="brand"><span class="mark"></span>BoardForge</div>
-  <div class="health" id="health"><span class="dot"></span><span>connecting</span></div>
-</header>
+  <div style="display:flex;gap:12px;align-items:center"><button class="btn" id="signOut" hidden>Sign out</button><div class="health" id="health"><span class="dot"></span><span>connecting</span></div>
+</div></header>
 
-<main>
+<section id="accessPanel" class="access-panel" hidden><h2>Access your workspace</h2><p>Enter the private invitation token provided to you.</p><form id="inviteForm"><label for="inviteToken">Invitation token</label><input id="inviteToken" type="password" required autocomplete="off" spellcheck="false"><button class="btn primary" type="submit" id="inviteSubmit">Continue</button></form><p id="accessStatus" role="status"></p></section><main hidden>
   <div class="intro">
     <div class="eyebrow">Your career workspace</div><h1>Find work that fits you.</h1>
     <p>Explore opportunities based on your skills, goals and the evidence in each job posting.</p>
@@ -120,7 +121,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
         <div class="row"><button class="btn primary" id="savePrefs">Save preferences</button></div>
         <div class="status" id="prefStatus"></div>
       </div>
-      <div class="box">
+      <div class="box" id="sourceAdmin" hidden>
         <div class="label">Add public career board</div>
         <input id="syncUrl" placeholder="Paste Greenhouse, Lever or Ashby URL">
         <div class="row"><button class="btn" id="syncBtn">Sync board</button></div>
@@ -148,11 +149,42 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
 </main>
 
 <script>
-const profileId='local-demo';
+let profileId=null, inviteToken='', authMode=false;
+function protectedFetch(path,options={}){
+  const headers=new Headers(options.headers||{});
+  if(inviteToken)headers.set('Authorization','Bearer '+inviteToken);
+  return fetch(path,{...options,headers,cache:'no-store'});
+}
+async function connect(token=''){
+  inviteToken=token;
+  try{
+    const r=await protectedFetch('/session');
+    if(r.status===401){
+      inviteToken='';profileId=null;
+      $('accessPanel').hidden=false;
+      $('accessStatus').textContent=token?'Invalid invitation token.':'';
+      return;
+    }
+    if(!r.ok)throw new Error('Workspace access unavailable.');
+    const d=await r.json();
+    profileId=d.profile_id;authMode=d.auth_required;
+    $('inviteToken').value='';
+    $('accessPanel').hidden=true;
+    document.querySelector('main').hidden=false;
+    $('signOut').hidden=!authMode;
+    $('sourceAdmin').hidden=authMode;
+    await restoreProfile();
+  }catch(e){
+    inviteToken='';profileId=null;
+    $('accessPanel').hidden=false;
+    $('accessStatus').textContent=e.message;
+  }
+}
+
 let hasProfile=false;
 const $=id=>document.getElementById(id);
 async function api(path,body){
-  const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const r=await protectedFetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const data=await r.json();
   if(!r.ok) throw new Error(data.detail||data.message||'Request failed');
   return data;
@@ -220,23 +252,6 @@ function render(matches){
   }).join('');
   document.querySelectorAll('.feedback').forEach(btn=>btn.onclick=()=>feedback(btn));
 }
-async function pollDiscovery(discovery,query=''){
-  if(!discovery||!discovery.request_id||discovery.status==='completed')return;
-  $('searchStatus').textContent+=' · discovering new sources in background';
-  for(let attempt=0;attempt<30;attempt++){
-    await new Promise(resolve=>setTimeout(resolve,1500));
-    const r=await fetch('/discovery/'+discovery.request_id);if(!r.ok)return;
-    const state=await r.json();
-    if(state.status==='completed'){
-      const fresh=await api('/search',{profile_id:profileId,query,top_k:15});
-      render(fresh.matches);const report=state.report||{};
-      $('searchStatus').textContent=fresh.matches.length+' relevant matches · '+(report.jobs_fetched||0)+' jobs refreshed in background';return;
-    }
-    if(state.status==='failed'){
-      $('searchStatus').textContent+=' · source refresh failed; showing indexed results';return;
-    }
-  }
-}
 async function feedback(btn){
   const card=btn.closest('.job');btn.disabled=true;
   try{
@@ -247,20 +262,17 @@ async function feedback(btn){
 }
 
 async function uploadResume(file){
-  if(!file)return;
-  $('resumeStatus').textContent='Reading resume and searching relevant job sources…';
+  if(!file||!profileId||$('chooseResume').disabled)return;
+  $('resumeStatus').textContent='Reading resume…';
   $('chooseResume').disabled=true;
   try{
-    const path='/resume?profile_id='+encodeURIComponent(profileId)+'&filename='+encodeURIComponent(file.name);
-    const r=await fetch(path,{method:'POST',headers:{'Content-Type':file.type||'application/octet-stream'},body:file});
+    const path='/resume?profile_id='+encodeURIComponent(profileId)+'&filename='+encodeURIComponent(file.name)+'&recommend=false';
+    const r=await protectedFetch(path,{method:'POST',headers:{'Content-Type':file.type||'application/octet-stream'},body:file});
     const d=await r.json();
     if(!r.ok)throw new Error(d.detail||'Resume upload failed');
     renderProfile(d.profile);
-    render(d.matches||[]);
-    const discovery=d.discovery||{};
     $('resumeStatus').textContent='Resume ready · '+(d.profile.skills||[]).length+' skills detected · review the profile below';
-    $('searchStatus').textContent=(d.matches||[]).length+' relevant recommendations from your resume';
-    pollDiscovery(discovery,'');
+    $('searchStatus').textContent='Profile ready. Confirm your details and search when ready.';
   }catch(e){$('resumeStatus').textContent=e.message}finally{$('chooseResume').disabled=false}
 }
 $('chooseResume').onclick=()=>$('resumeInput').click();
@@ -272,7 +284,7 @@ drop.addEventListener('drop',e=>uploadResume(e.dataTransfer.files[0]));
 
 let searchRunning=false;
 async function search(){
-  if(searchRunning)return;
+  if(searchRunning||!profileId)return;
   const query=$('query').value.trim();
   if(!query){$('searchStatus').textContent='Describe the roles you want to find.';return;}
   const b=$('searchBtn');searchRunning=true;b.disabled=true;
@@ -295,7 +307,7 @@ $('reviewProfile').onclick=async()=>{
   const split=id=>$(id).value.split(',').map(x=>x.trim()).filter(Boolean);
   $('reviewProfile').disabled=true;
   try{
-    const r=await fetch('/candidate-profile/'+encodeURIComponent(profileId),{
+    const r=await protectedFetch('/candidate-profile/'+encodeURIComponent(profileId),{
       method:'PUT',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({target_roles:split('targetRoles'),skills:split('profileSkills'),reviewed:true})
     });
@@ -303,9 +315,9 @@ $('reviewProfile').onclick=async()=>{
   }catch(e){$('profileStatus').textContent=e.message}finally{$('reviewProfile').disabled=false}
 };
 $('deleteProfile').onclick=async()=>{
-  if(!confirm('Delete your extracted profile, preferences and feedback from this local demo?'))return;
-  const r=await fetch('/candidate-profile/'+encodeURIComponent(profileId),{method:'DELETE'});
-  if(r.ok){activeProfile=null;$('profileCard').classList.remove('show');$('results').innerHTML='<div class="empty"><div><strong>Profile deleted.</strong>Upload a resume or search directly.</div></div>';}
+  if(!confirm('Delete your extracted profile, preferences and feedback from your workspace?'))return;
+  const r=await protectedFetch('/candidate-profile/'+encodeURIComponent(profileId),{method:'DELETE'});
+  if(r.ok){activeProfile=null;hasProfile=false;$('profileChips').replaceChildren();$('profileEvidence').replaceChildren();$('targetRoles').value='';$('profileSkills').value='';$('prefs').value='';$('profileFile').textContent='';$('agentActivity').hidden=true;$('activitySteps').replaceChildren();$('profileCard').classList.remove('show');$('results').innerHTML='<div class="empty"><div><strong>Profile deleted.</strong>Upload a resume or search directly.</div></div>';}
 };
 
 $('savePrefs').onclick=async()=>{
@@ -324,13 +336,20 @@ $('syncBtn').onclick=async()=>{
 
 async function restoreProfile(){
   try{
-    const r=await fetch('/candidate-profile/'+encodeURIComponent(profileId));
+    const r=await protectedFetch('/candidate-profile/'+encodeURIComponent(profileId));
     const d=await r.json();
     if(r.ok&&d.profile){renderProfile(d.profile);$('searchStatus').textContent='Saved profile loaded. Search when ready.'}
   }catch(_){}
 }
 fetch('/health').then(r=>r.json()).then(d=>{const el=$('health');el.classList.add('ok');el.querySelector('span:last-child').textContent='v'+d.version+' · online'}).catch(()=>{$('health').querySelector('span:last-child').textContent='offline'});
-restoreProfile();
+$('inviteForm').onsubmit=async e=>{
+  e.preventDefault();
+  if($('inviteSubmit').disabled)return;
+  $('inviteSubmit').disabled=true;
+  try{await connect($('inviteToken').value.trim());}finally{$('inviteSubmit').disabled=false;}
+};
+$('signOut').onclick=()=>{inviteToken='';profileId=null;location.reload()};
+connect();
 </script>
 </body>
 </html>
