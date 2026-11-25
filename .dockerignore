@@ -9,3 +9,10 @@
 *.db
 results
 tests
+
+.env.*
+!.env.example
+*.pdf
+*.docx
+*.pem
+*.key
