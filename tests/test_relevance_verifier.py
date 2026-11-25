@@ -736,3 +736,41 @@ def test_job_agent_feature_integration_applies_bidirectional_verification(tmp_pa
     verification = result.data["retrieval"]["relevance_verification"]
     assert verification["enabled"] is True
     assert verification["downgraded"] == 1
+
+
+@pytest.mark.parametrize("ids,expected", [
+    (["E001", "E002", "E003"], "recommended"),
+    (["E001", "E002", "E999"], "needs_verification"),
+    (["E001", "E002", "E001"], "needs_verification"),
+])
+def test_extra_evidence_references(tmp_path, ids, expected):
+    store = Store(str(tmp_path / "extra-evidence.db"))
+
+    candidate = job(
+        "vision",
+        "Vision Engineer",
+        "Build computer vision models.\n"
+        "Develop perception systems.\n"
+        "Deploy computer vision pipelines.",
+    )
+
+    provider = MockProvider([{"judgments": [{
+        "candidate_ref": "C001",
+        "relevance": "direct",
+        "evidence_ids": ids,
+        "reasoning": "Relevant engineering responsibilities.",
+    }]}])
+
+    verified, meta = run(
+        RelevanceVerifier(store, provider, enabled=True),
+        [match(candidate)],
+    )
+
+    assert verified[0].status == expected
+
+    if expected == "recommended":
+        assert meta["candidate_validation_failures"] == {}
+        assert len([
+            e for e in verified[0].evidence
+            if e.kind == "llm_relevance"
+        ]) <= 2

@@ -25,7 +25,7 @@ from boardforge.matching import hard_violations
 from boardforge.models import Job, Match, MatchEvidence, Preferences
 
 
-PROMPT_VERSION = "relevance-verifier-v3-evidence-refs"
+PROMPT_VERSION = "relevance-verifier-v4-evidence-normalization"
 CACHE_FORMAT_VERSION = 3
 RelevanceLabel = Literal["direct", "adjacent", "irrelevant", "uncertain"]
 
@@ -36,7 +36,9 @@ SYSTEM_PROMPT = (
     "Judge actual responsibilities against the search intent and preferences. "
     "Do not infer relevance from company boilerplate, incidental technology mentions, "
     "optional qualifications, or a different occupational family. A posting explicitly "
-    "stating there is no current vacancy is irrelevant. Cite only evidence IDs supplied "
+    "stating there is no current vacancy is irrelevant. "
+    "Return at most two evidence IDs per candidate. "
+    "Cite only evidence IDs supplied "
     "for that same candidate; never copy or invent evidence text or IDs. Use uncertain when "
     "the supplied description cannot support a conclusion. Return exactly one judgment "
     "for every candidate and none for unknown candidates. Keep reasoning to one "
@@ -56,7 +58,7 @@ _NO_VACANCY_PATTERNS = (
 class ProviderJudgment(BaseModel):
     candidate_ref: str = Field(validation_alias=AliasChoices("candidate_ref", "candidate_id"))
     relevance: RelevanceLabel
-    evidence_ids: list[str] = Field(max_length=2)
+    evidence_ids: list[str]
     reasoning: str = Field(min_length=1)
 
 
@@ -587,12 +589,43 @@ class RelevanceVerifier:
             return self._fallback(
                 job.stable_id, "referenced evidence does not substantively support the judgment"
             )
+        selected_ids = judgment.evidence_ids[:2]
+        selected_evidence = evidence[:2]
+
+        if requires_evidence and not _evidence_is_supportive(
+            selected_evidence,
+            job=job,
+            intent=intent,
+            relevance=judgment.relevance,
+        ):
+            for evidence_id, snippet in zip(
+                judgment.evidence_ids, evidence
+            ):
+                if _evidence_is_supportive(
+                    [snippet],
+                    job=job,
+                    intent=intent,
+                    relevance=judgment.relevance,
+                ):
+                    selected_ids = [evidence_id]
+                    selected_evidence = [snippet]
+                    break
+            else:
+                return self._fallback(
+                    job.stable_id,
+                    "No supporting evidence within reference limit",
+                )
+
+        normalized = judgment.model_copy(
+            update={"evidence_ids": selected_ids}
+        )
+
         return ResolvedJudgment(
             candidate_id=job.stable_id,
             relevance=judgment.relevance,
-            evidence_ids=judgment.evidence_ids,
-            reasoning=_resolved_reasoning(judgment),
-            evidence_snippets=evidence,
+            evidence_ids=selected_ids,
+            reasoning=_resolved_reasoning(normalized),
+            evidence_snippets=selected_evidence,
             evidence_validated=True,
         )
 
