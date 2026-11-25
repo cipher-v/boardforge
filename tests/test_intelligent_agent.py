@@ -56,7 +56,7 @@ class FixtureCore:
         self.real = JobAgent(store)
 
     async def search_jobs(
-        self, profile_id, query="", top_k=10, *, deadline_monotonic=None,
+        self, profile_id, query="", top_k=10, *, deadline_monotonic=None, original_query=None,
     ):
         matches = []
         for index in range(self.recommended):

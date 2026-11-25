@@ -265,6 +265,7 @@ class AgentToolExecutor:
             searched = await self.core.search_jobs(
                 state.profile_id, arguments.query, arguments.top_k,
                 deadline_monotonic=deadline_monotonic,
+                original_query=state.user_text,
             )
             matches = searched.data.get("matches", [])
             bounded = [self._bounded_match(match) for match in matches[:10]]
@@ -290,9 +291,9 @@ class AgentToolExecutor:
                     searched.data.get("retrieval", {})
                 ),
             }
-            verification = searched.data.get(
-                "retrieval", {}
-            ).get("verification", {})
+            retrieval = searched.data.get("retrieval", {})
+            verification = retrieval.get("relevance_verification", retrieval.get("verification", {}))
+            result["verification_quota_denied"] = bool(verification.get("quota_denials"))
 
             if state.recommended_count:
                 result["result_state"] = "verified_recommendations"

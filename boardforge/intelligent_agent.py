@@ -667,7 +667,9 @@ class ToolCallingAgent:
                         "state": state_snapshot(),
                     })
                     break
-                if state.stopped_reason in {"tool_timeout", "insufficient_remaining_time"}:
+                if result.get("verification_quota_denied"):
+                    state.stopped_reason = "verification_incomplete"
+                if state.stopped_reason in {"tool_timeout", "insufficient_remaining_time", "verification_incomplete"}:
                     await emit({
                         "type": "stop_condition", "reason": state.stopped_reason,
                         "state": state_snapshot(),

@@ -352,6 +352,8 @@ def rank_jobs(
     matches.sort(
         key=lambda match: (
             match.status == "needs_verification",
+            (preferences.max_required_experience_years is not None
+             and match.job.min_experience_years is None),
             -match.score,
             match.job.title.casefold(),
         )

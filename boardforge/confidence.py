@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass
 
 from boardforge.models import Job, Match, MatchEvidence, Preferences
+from boardforge.preferences import EXPERIENCE_CAP_RE
 
 
 TOKEN_RE = re.compile(r"[a-zA-Z0-9+#.]{2,}")
@@ -92,6 +93,22 @@ class RelevanceAssessment:
     reasons: tuple[str, ...]
 
 
+def occupational_query_text(query: str) -> str:
+    """Remove search framing and eligibility phrases, not occupational evidence."""
+    cleaned = EXPERIENCE_CAP_RE.sub(" ", query.casefold())
+    for pattern in (
+        r"\b(?:entry[- ]level|early[- ]career|freshers?|new grads?|recent graduates?)\b",
+        r"\b(?:i have|i've got)\s+no\s+(?:formal\s+)?(?:employment\s+|work\s+|professional\s+)?experience\b",
+        r"\b(?:suitable for|matching|based on)\s+my\s+(?:profile|resume|cv|background)\b",
+        r"\b(?:and\s+)?(?:clearly\s+)?flag\s+(?:any\s+)?(?:uncertain|unknown|unverified)\s+eligibility\b",
+        r"\b(?:find|search for|show me|include)\b",
+    ):
+        cleaned = re.sub(pattern, " ", cleaned)
+    # Sentence punctuation is not a technical query term.
+    cleaned = re.sub(r"[.,;:!?](?=\s|$)", " ", cleaned)
+    return " ".join(cleaned.split())
+
+
 def parse_query_intent(preferences: Preferences, query: str) -> QueryIntent:
     low = query.casefold().replace("-", " ")
     leadership = bool(LEADERSHIP_TITLE_RE.search(low)) and not ACCOUNT_MANAGER_RE.search(low)
@@ -99,7 +116,7 @@ def parse_query_intent(preferences: Preferences, query: str) -> QueryIntent:
         re.search(r"\b(?:engineer|developer|scientist|specialist)\b", low)
     ) and not leadership
 
-    cleaned = low
+    cleaned = occupational_query_text(query).replace("-", " ")
     for term in [*preferences.countries, *preferences.locations]:
         if term:
             cleaned = re.sub(

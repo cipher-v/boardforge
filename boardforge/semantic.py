@@ -14,6 +14,7 @@ from typing import Protocol
 import httpx
 
 from boardforge.database import StoreProtocol
+from boardforge.confidence import occupational_query_text
 from boardforge.matching import job_text, rank_jobs
 from boardforge.models import Job, Match, Preferences
 from boardforge.observability import observe_embedding_request
@@ -34,7 +35,7 @@ def cosine(a: list[float], b: list[float]) -> float:
 
 def semantic_query_text(preferences: Preferences, query: str = "") -> str:
     """Keep semantic retrieval focused on role/skill intent, not hard-filter tokens."""
-    cleaned = query
+    cleaned = occupational_query_text(query)
     for term in [*preferences.countries, *preferences.locations]:
         if term:
             cleaned = re.sub(
@@ -476,6 +477,8 @@ async def hybrid_rank_jobs(
         key=lambda match: (
             bool(match.hard_violations),
             match.status == "needs_verification",
+            (prefs.max_required_experience_years is not None
+             and match.job.min_experience_years is None),
             -match.score,
             match.job.title.lower(),
         )

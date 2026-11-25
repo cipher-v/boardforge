@@ -21,6 +21,7 @@ ROLE_MAP = {
     "computer vision": "Computer Vision",
     "backend": "Backend",
     "software engineer": "Software Engineering",
+    "software engineering": "Software Engineering",
     "sde": "Software Engineering",
     "data engineer": "Data Engineering",
     "data scientist": "Data Science",

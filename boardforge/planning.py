@@ -48,7 +48,11 @@ def plan_tools(text: str, *, top_k: int = 10) -> list[PlannedTool]:
             "record_feedback",
             {"job_id": job_id_match.group(0), "verdict": _feedback_verdict(text), "note": ""},
         ))
-    if PREFERENCE_CUES.search(text):
+    preference_text = re.sub(
+        r"\bi have\s+no\s+(?:formal\s+)?(?:employment\s+|work\s+|professional\s+)?experience\b",
+        " ", text, flags=re.I,
+    )
+    if PREFERENCE_CUES.search(preference_text):
         tools.append(PlannedTool("update_preferences", {"text": text}))
 
     search_requested = bool(SEARCH_CUES.search(text))
