@@ -42,7 +42,7 @@ async def private_response_cache_control(request: Request, call_next):
     private_prefixes = (
         "/candidate-profile/", "/recommendations/", "/discovery/",
     )
-    if request.url.path.startswith(private_prefixes):
+    if request.url.path == "/session" or request.url.path.startswith(private_prefixes):
         response.headers["Cache-Control"] = "no-store, private"
         vary = {value.strip() for value in response.headers.get("Vary", "").split(",") if value.strip()}
         vary.add("Authorization")
