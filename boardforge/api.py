@@ -22,7 +22,7 @@ from boardforge.models import (
 from boardforge.observability import metrics_response, request_observability
 from boardforge.resume import extract_candidate_profile, extract_resume_text
 from boardforge.sync import sync_url
-from boardforge.tool_agent import ToolCallingAgent
+from boardforge.intelligent_agent import ToolCallingAgent
 
 
 app = FastAPI(
@@ -34,6 +34,20 @@ store = create_store()
 core_agent = JobAgent(store)
 tool_agent = ToolCallingAgent(core_agent)
 app.middleware("http")(request_observability)
+
+
+@app.middleware("http")
+async def private_response_cache_control(request: Request, call_next):
+    response = await call_next(request)
+    private_prefixes = (
+        "/candidate-profile/", "/recommendations/", "/discovery/",
+    )
+    if request.url.path.startswith(private_prefixes):
+        response.headers["Cache-Control"] = "no-store, private"
+        vary = {value.strip() for value in response.headers.get("Vary", "").split(",") if value.strip()}
+        vary.add("Authorization")
+        response.headers["Vary"] = ", ".join(sorted(vary))
+    return response
 
 
 class SyncRequest(BaseModel):

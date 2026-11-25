@@ -9,6 +9,90 @@ explanation of why each change was made. It is not a changelog: routine file
 lists belong in Git history; this document records engineering evidence and
 trade-offs.
 
+## 2026-11-25 - Frontend/backend integration and resume extraction audit
+
+### Scope and safety
+
+The current editorial UI, API ownership boundaries, persistence, and the
+attached one-page resume were audited entirely locally. The resume was rendered
+to PNG and visually compared with Poppler text extraction, then uploaded once
+with `recommend=false` into a disposable SQLite database. Temporary PDF text,
+images, browser profiles, and databases were deleted after validation. No
+resume, contact data, credential, or generated private artifact was added to
+the repository. Tavily, ATS synchronization, Vertex, Gemini, Groq, and every
+other external inference/discovery path remained unused.
+
+### Resume findings and corrections
+
+The original deterministic extraction hallucinated JavaScript because its
+bare `node` alias matched “incremental node representations.” It also treated
+the summary sentence as education and a project, attached unrelated fallback
+text to inferred roles, inferred a data/analytics domain from SQL alone, and
+omitted many technologies explicitly listed in the skills section. Extraction
+is now section-aware, uses role-specific source evidence, requires `Node.js` or
+`JavaScript` for that skill, no longer treats SQL alone as a data domain, and
+rejoins visual PDF word breaks such as `Representa-\ntion`. The skill vocabulary
+now covers the resume's agent, retrieval, backend/cloud, and engineering stack.
+
+The corrected local upload returned HTTP 200, zero recommendations as required,
+an unreviewed profile, four accurate education lines, no invented employment
+history, the two named projects plus Repowise contributions, and grounded role
+signals for AI/ML, computer vision, backend, and software engineering.
+Publication and achievement content remains visible in the source resume but
+is not represented because `CandidateProfile` has no publication or achievement
+fields; adding them was outside this focused integration task.
+
+### Integration defects corrected
+
+1. `/agent` was still instantiated from the legacy OpenAI-key tool agent. The
+   API now uses the bounded provider-independent intelligent agent developed in
+   the previous milestone. With agent inference disabled it preserves the
+   deterministic fallback and makes no provider call.
+2. Authenticated profile, recommendation, and discovery-status GET responses
+   now send `Cache-Control: no-store, private` and `Vary: Authorization`.
+3. Concurrent login/profile restoration could display a delayed response from
+   the previous invite-token user. Session and workspace generations now reject
+   stale restoration, upload, confirmation, search, and feedback responses and
+   clear prior-user state on identity changes or failed authentication.
+4. A profile deletion could race an in-flight search and allow old results to
+   reappear. Deletion now invalidates pending workspace operations, reports API
+   errors, has an explicit loading state, and preserves accurate UI state.
+5. Save and reject controls could submit contradictory feedback concurrently.
+   Card feedback actions are now locked together during a request.
+6. The first twelve evidence entries were all skills for rich profiles. The UI
+   now shows a bounded representative mix of role, education, project or
+   experience, and skill evidence. Safe URL filtering and HTML escaping remain
+   intact.
+
+### Configuration audit
+
+In the inspected local environment, all external enable flags were unset and
+there were no Tavily, Brave, Groq, Google project, invite-token, or admin values
+in the process environment. The local `.env` only selected `groq` as the
+relevance provider; the verifier enable flag was unset and no Groq key was
+present, so it remained disabled. Effective runtime diagnostics reported
+embeddings, relevance verification, intelligent-agent inference, and discovery
+all disabled. Discovery currently relies on absent credentials when the search
+provider flag is unset (its default is Tavily), so offline/test launches should
+continue setting `BOARDFORGE_SEARCH_PROVIDER=none` explicitly rather than rely
+on missing keys.
+
+### Verification
+
+- Corrected attached-resume upload: HTTP 200, `recommend=false`, zero matches.
+- Two-user API integration: upload, confirmation, durable restoration from a
+  reopened database, deletion, feedback/preferences cleanup, and cross-user
+  denial all passed using isolated profiles.
+- Real headless Chrome executed the production HTML/JavaScript against fully
+  deterministic mocked APIs. It covered authentication, application links,
+  evidence, save feedback, loading/error states, duplicate operations, stale
+  responses, deletion, unsafe URL rejection, and bearer-token propagation.
+- Focused integration suite: **19 passed** before the final hyphenation case.
+- Deterministic agent evaluation: **40/40 exact tool sequences**.
+- Complete suite with isolated PostgreSQL/pgvector: **222 passed**, with the
+  existing Starlette/httpx deprecation warning only.
+- `git diff --check` passed. No deployment or external call occurred.
+
 ## 2026-11-25 - v4 live-agent provider failure investigation
 
 ### Root cause and artifact evidence

@@ -10,8 +10,9 @@ from boardforge.models import CandidateEvidence, CandidateProfile, Preferences
 SKILL_ALIASES: dict[str, tuple[str, ...]] = {
     "Python": (r"\bpython\b",),
     "Java": (r"\bjava\b",),
-    "JavaScript": (r"\bjavascript\b", r"\bnode(?:\.js)?\b"),
+    "JavaScript": (r"\bjavascript\b", r"\bnode\.?js\b"),
     "TypeScript": (r"\btypescript\b",),
+    "C++": (r"(?<!\w)c\+\+(?!\w)",),
     "SQL": (r"\bsql\b",),
     "PostgreSQL": (r"\bpostgres(?:ql)?\b",),
     "FastAPI": (r"\bfastapi\b",),
@@ -21,6 +22,11 @@ SKILL_ALIASES: dict[str, tuple[str, ...]] = {
     "PyTorch": (r"\bpytorch\b", r"\btorch\b"),
     "TensorFlow": (r"\btensorflow\b",),
     "scikit-learn": (r"\bscikit[- ]learn\b", r"\bsklearn\b"),
+    "NLP": (r"\bnlp\b", r"\bnatural language processing\b"),
+    "Transformers": (r"\btransformers?\b",),
+    "Model Evaluation": (r"\bmodel evaluation\b",),
+    "Representation Learning": (r"\brepresentation learning\b",),
+    "PyTorch Geometric": (r"\bpytorch geometric\b",),
     "Pandas": (r"\bpandas\b",),
     "NumPy": (r"\bnumpy\b",),
     "OpenCV": (r"\bopencv\b",),
@@ -28,15 +34,75 @@ SKILL_ALIASES: dict[str, tuple[str, ...]] = {
     "LLMs": (r"\bllms?\b", r"\blarge language models?\b"),
     "RAG": (r"\brag\b", r"\bretrieval[- ]augmented generation\b"),
     "Embeddings": (r"\bembeddings?\b",),
+    "Vector Search": (r"\bvector search\b",),
     "FAISS": (r"\bfaiss\b",),
     "LangChain": (r"\blangchain\b",),
+    "LangGraph": (r"\blanggraph\b",),
+    "LlamaIndex": (r"\bllamaindex\b",),
+    "Google ADK": (r"\bgoogle adk\b",),
+    "Gemini": (r"\bgemini\b",),
+    "Vertex AI": (r"\bvertex ai\b",),
+    "MCP": (r"\bmcp\b",),
+    "Tool/Function Calling": (r"\btool/function calling\b", r"\bfunction calling\b"),
+    "Structured Outputs": (r"\bstructured outputs?\b",),
+    "LLM Evaluation": (r"\bllm evaluation\b",),
+    "Sentence Transformers": (r"\bsentence transformers?\b",),
+    "Reranking": (r"\breranking\b",),
+    "Whisper": (r"\bwhisper\b",),
+    "Tesseract OCR": (r"\btesseract(?: ocr)?\b",),
+    "FFmpeg": (r"\bffmpeg\b",),
+    "Pydantic": (r"\bpydantic\b",),
     "Docker": (r"\bdocker\b",),
     "Kubernetes": (r"\bkubernetes\b", r"\bk8s\b"),
     "AWS": (r"\baws\b", r"\bamazon web services\b"),
+    "Cloud Run": (r"\bcloud run\b",),
+    "Cloud Tasks": (r"\bcloud tasks\b",),
+    "Firestore": (r"\bfirestore\b",),
+    "Modal": (r"\bmodal\b",),
     "Git": (r"\bgit\b", r"\bgithub\b"),
+    "GitHub Actions": (r"\bgithub actions\b",),
+    "pytest": (r"\bpytest\b",),
+    "Ruff": (r"\bruff\b",),
+    "Linux": (r"\blinux\b",),
+    "GitHub Webhooks/Checks": (r"\bgithub webhooks?/checks\b",),
+    "Static Analysis": (r"\bstatic analysis\b",),
+    "ASTs": (r"\basts?\b",),
+    "Tree-sitter": (r"\btree[- ]sitter\b",),
     "REST APIs": (r"\brest(?:ful)?\s+apis?\b", r"\bapi development\b"),
     "Spark": (r"\b(?:apache\s+)?spark\b",),
     "Airflow": (r"\b(?:apache\s+)?airflow\b",),
+}
+
+SECTION_HEADINGS = {
+    "summary": "summary",
+    "education": "education",
+    "open source contributions": "open_source",
+    "projects": "projects",
+    "publication": "publication",
+    "publications": "publication",
+    "technical skills": "skills",
+    "skills": "skills",
+    "experience": "experience",
+    "work experience": "experience",
+    "achievements": "achievements",
+}
+
+ROLE_EVIDENCE_PATTERNS: dict[str, tuple[str, ...]] = {
+    "AI/ML": (
+        r"\b(?:machine learning|agentic ai|llms?|rag|pytorch|tensorflow|"
+        r"scikit[- ]learn|transformers?)\b",
+    ),
+    "Computer Vision": (
+        r"\b(?:computer vision|opencv|object detection|image segmentation|"
+        r"tesseract|video q&a)\b",
+    ),
+    "Backend": (r"\b(?:backend|fastapi|rest(?:ful)? apis?|server[- ]side)\b",),
+    "Software Engineering": (
+        r"\b(?:software engineering|production fixes?|static analysis|"
+        r"regression tests?|github pr|typescript)\b",
+    ),
+    "Data Engineering": (r"\b(?:data engineering|etl|spark|airflow)\b",),
+    "Data Science": (r"\b(?:data science|statistical|analytics)\b",),
 }
 
 DOMAIN_RULES: dict[str, tuple[str, ...]] = {
@@ -44,7 +110,7 @@ DOMAIN_RULES: dict[str, tuple[str, ...]] = {
     "RAG / Retrieval": (r"\brag\b", r"\bretrieval\b", r"\bsemantic search\b", r"\bembeddings?\b"),
     "Computer Vision": (r"\bcomputer vision\b", r"\bobject detection\b", r"\bsegmentation\b", r"\bopencv\b", r"\byolo"),
     "Backend / APIs": (r"\bbackend\b", r"\bback-end\b", r"\bfastapi\b", r"\bdjango\b", r"\bflask\b", r"\brest(?:ful)?\s+apis?\b"),
-    "Data / Analytics": (r"\bdata science\b", r"\bdata engineering\b", r"\betl\b", r"\bpandas\b", r"\bsql\b"),
+    "Data / Analytics": (r"\bdata science\b", r"\bdata engineering\b", r"\betl\b", r"\bpandas\b", r"\banalytics\b"),
 }
 
 EDUCATION_RE = re.compile(
@@ -74,6 +140,10 @@ def extract_resume_text(filename: str, data: bytes) -> str:
     except Exception as exc:
         raise ValueError(f"could not read resume: {exc}") from exc
 
+    # PDF extractors preserve visual line wrapping and commonly split a word as
+    # ``Representa-\ntion``. Rejoin only an alphabetic hyphen at a line boundary;
+    # ordinary in-line compounds remain unchanged.
+    text = re.sub(r"(?<=[A-Za-z])-\s*\n\s*(?=[A-Za-z])", "", text)
     text = "\n".join(line.strip() for line in text.splitlines() if line.strip())
     if len(text) < 40:
         raise ValueError("resume did not contain enough readable text")
@@ -101,6 +171,21 @@ def _evidence_snippet(text: str, patterns: tuple[str, ...], fallback: str) -> st
         if cleaned and _matches_any(cleaned, patterns):
             return cleaned[:220]
     return fallback[:220]
+
+
+def _sectioned_lines(text: str) -> list[tuple[str, str]]:
+    section = ""
+    rows: list[tuple[str, str]] = []
+    for line in text.splitlines():
+        cleaned = " ".join(line.split())
+        if not cleaned:
+            continue
+        heading = SECTION_HEADINGS.get(cleaned.casefold().rstrip(":"))
+        if heading:
+            section = heading
+            continue
+        rows.append((section, cleaned))
+    return rows
 
 
 def extract_candidate_profile(text: str, *, filename: str = "") -> CandidateProfile:
@@ -151,21 +236,44 @@ def extract_candidate_profile(text: str, *, filename: str = "") -> CandidateProf
     education: list[str] = []
     projects: list[str] = []
     experience: list[str] = []
-    for line in text.splitlines():
-        cleaned = " ".join(line.split())
-        if cleaned and EDUCATION_RE.search(cleaned):
-            education.append(cleaned[:180])
-        if re.search(r"\b(?:built|developed|implemented|created|designed|shipped)\b", cleaned, re.I):
-            projects.append(cleaned[:220])
+    sectioned = _sectioned_lines(text)
+    known_sections = {section for section, _ in sectioned if section}
+    structured = bool(known_sections)
+    has_education_section = "education" in known_sections
+    has_project_section = bool({"projects", "open_source"} & known_sections)
+    for section, cleaned in sectioned:
         if (
+            (section == "education" or (not has_education_section and not structured))
+            and EDUCATION_RE.search(cleaned)
+        ):
+            education.append(cleaned[:180])
+        project_action = re.search(
+            r"\b(?:built|developed|implemented|created|designed|shipped|fixed)\b",
+            cleaned, re.I,
+        )
+        project_title = (
+            not cleaned.startswith("•")
+            and bool(re.search(
+                r"\s[-–—]\s|\b(?:source|repository|live demo)(?:\s*\|.*)?$",
+                cleaned, re.I,
+            ))
+            and not re.match(r"^merged pr\b", cleaned, re.I)
+        )
+        if (
+            (section in {"projects", "open_source"} and (
+                project_title or project_action
+            ))
+            or (not has_project_section and not structured and project_action)
+        ):
+            projects.append(cleaned[:220])
+        if (section == "experience" or (not structured and section == "")) and (
             re.search(r"\b(?:intern(?:ship)?|experience|engineer|developer|researcher)\b", cleaned, re.I)
             and not EDUCATION_RE.search(cleaned)
-            and not re.match(r"^(?:projects?|skills?|experience)\s*:?$", cleaned, re.I)
         ):
             experience.append(cleaned[:220])
 
     education = _unique(education)[:5]
-    projects = _unique(projects)[:5]
+    projects = _unique(projects)[:10]
     experience = _unique(experience)[:5]
 
     evidence: list[CandidateEvidence] = []
@@ -178,9 +286,9 @@ def extract_candidate_profile(text: str, *, filename: str = "") -> CandidateProf
                 confidence=0.9,
             ))
     for role in role_signals:
-        supporting = next(
-            (line for line in projects + experience if role.casefold().split("/")[0] in line.casefold()),
-            projects[0] if projects else role,
+        patterns = ROLE_EVIDENCE_PATTERNS.get(role, (re.escape(role),))
+        supporting = _evidence_snippet(
+            text, patterns, f"No source evidence found for inferred role: {role}",
         )
         evidence.append(CandidateEvidence(
             kind="role", value=role, snippet=supporting, confidence=0.65,
@@ -205,7 +313,7 @@ def extract_candidate_profile(text: str, *, filename: str = "") -> CandidateProf
         education=education,
         projects=projects,
         experience=experience,
-        evidence=evidence[:30],
+        evidence=evidence[:100],
         resume_filename=Path(filename).name if filename else "",
     )
 

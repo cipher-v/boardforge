@@ -149,33 +149,42 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
 </main>
 
 <script>
-let profileId=null, inviteToken='', authMode=false;
+let profileId=null, inviteToken='', authMode=false, sessionAttempt=0, workspaceVersion=0;
 function protectedFetch(path,options={}){
   const headers=new Headers(options.headers||{});
   if(inviteToken)headers.set('Authorization','Bearer '+inviteToken);
   return fetch(path,{...options,headers,cache:'no-store'});
 }
 async function connect(token=''){
+  const attempt=++sessionAttempt,previousProfileId=profileId;
   inviteToken=token;
   try{
     const r=await protectedFetch('/session');
+    if(attempt!==sessionAttempt)return;
     if(r.status===401){
       inviteToken='';profileId=null;
+      resetWorkspace('Sign in to access your workspace.');
+      document.querySelector('main').hidden=true;$('signOut').hidden=true;
       $('accessPanel').hidden=false;
       $('accessStatus').textContent=token?'Invalid invitation token.':'';
       return;
     }
     if(!r.ok)throw new Error('Workspace access unavailable.');
     const d=await r.json();
+    if(attempt!==sessionAttempt)return;
+    if(previousProfileId!==d.profile_id)resetWorkspace();
     profileId=d.profile_id;authMode=d.auth_required;
     $('inviteToken').value='';
     $('accessPanel').hidden=true;
     document.querySelector('main').hidden=false;
     $('signOut').hidden=!authMode;
     $('sourceAdmin').hidden=authMode;
-    await restoreProfile();
+    await restoreProfile(attempt,d.profile_id);
   }catch(e){
+    if(attempt!==sessionAttempt)return;
     inviteToken='';profileId=null;
+    resetWorkspace('Workspace access failed.');
+    document.querySelector('main').hidden=true;$('signOut').hidden=true;
     $('accessPanel').hidden=false;
     $('accessStatus').textContent=e.message;
   }
@@ -183,9 +192,20 @@ async function connect(token=''){
 
 let hasProfile=false;
 const $=id=>document.getElementById(id);
+function resetWorkspace(message='Upload a resume for recommendations, or search above.'){
+  workspaceVersion++;
+  searchRequest++;searchRunning=false;$('searchBtn').disabled=false;
+  activeProfile=null;hasProfile=false;
+  $('profileChips').replaceChildren();$('profileEvidence').replaceChildren();
+  $('targetRoles').value='';$('profileSkills').value='';$('prefs').value='';
+  $('profileFile').textContent='';$('profileCard').classList.remove('show');
+  $('agentActivity').hidden=true;$('activitySteps').replaceChildren();
+  $('searchStatus').textContent=message;
+  $('results').innerHTML='<div class="empty"><div><strong>No recommendations yet.</strong>Upload your resume or search for a role.</div></div>';
+}
 async function api(path,body){
   const r=await protectedFetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  const data=await r.json();
+  let data={};try{data=await r.json()}catch(_){data={}}
   if(!r.ok) throw new Error(data.detail||data.message||'Request failed');
   return data;
 }
@@ -205,6 +225,17 @@ const matchBand=score=>score>=.65?'Strong match':score>=.35?'Good match':'Explor
 const seenLabel=value=>value?'indexed '+new Date(value).toLocaleDateString(undefined,{month:'short',day:'numeric'}):'';
 let activeProfile=null;
 
+function selectedProfileEvidence(evidence){
+  const rows=Array.isArray(evidence)?evidence:[],selected=[];
+  for(const kinds of [['role'],['education'],['project','experience'],['skill']]){
+    for(const row of rows){
+      if(kinds.includes(row.kind)&&!selected.includes(row)&&selected.length<12)selected.push(row);
+      if(selected.length>=12)break;
+    }
+  }
+  return selected;
+}
+
 function renderProfile(profile){
   if(!profile)return;
   activeProfile=profile;
@@ -216,7 +247,7 @@ function renderProfile(profile){
   $('profileChips').innerHTML=[...roles,...skills].join('');
   $('targetRoles').value=((profile.target_roles||[]).length?profile.target_roles:profile.role_signals||[]).join(', ');
   $('profileSkills').value=(profile.skills||[]).join(', ');
-  $('profileEvidence').innerHTML=(profile.evidence||[]).slice(0,12).map(e=>
+  $('profileEvidence').innerHTML=selectedProfileEvidence(profile.evidence).map(e=>
     '<div class="evidence-item"><b>'+esc(e.kind)+' · '+esc(e.value)+'</b><br>'+esc(e.snippet)+'</div>'
   ).join('')||'<div class="evidence-item">No evidence snippets available.</div>';
   $('profileStatus').textContent=profile.reviewed?'Profile confirmed — target roles are explicit constraints.':'Inferred roles are suggestions until you confirm them.';
@@ -253,23 +284,28 @@ function render(matches){
   document.querySelectorAll('.feedback').forEach(btn=>btn.onclick=()=>feedback(btn));
 }
 async function feedback(btn){
-  const card=btn.closest('.job');btn.disabled=true;
+  const card=btn.closest('.job'),version=workspaceVersion,currentProfile=profileId;
+  const buttons=[...card.querySelectorAll('.feedback')];buttons.forEach(item=>item.disabled=true);
   try{
-    await api('/feedback',{profile_id:profileId,job_id:card.dataset.id,verdict:btn.dataset.v,note:''});
+    await api('/feedback',{profile_id:currentProfile,job_id:card.dataset.id,verdict:btn.dataset.v,note:''});
+    if(version!==workspaceVersion||currentProfile!==profileId)return;
     btn.textContent=btn.dataset.v==='reject'?'Rejected':'Saved';
     if(btn.dataset.v==='reject'){card.style.opacity='.4';card.style.filter='grayscale(.5)'}
-  }catch(e){alert(e.message);btn.disabled=false}
+    buttons.filter(item=>item!==btn).forEach(item=>item.disabled=false);
+  }catch(e){if(version===workspaceVersion)alert(e.message);buttons.forEach(item=>item.disabled=false)}
 }
 
 async function uploadResume(file){
   if(!file||!profileId||$('chooseResume').disabled)return;
+  const version=workspaceVersion,currentProfile=profileId;
   $('resumeStatus').textContent='Reading resume…';
   $('chooseResume').disabled=true;
   try{
-    const path='/resume?profile_id='+encodeURIComponent(profileId)+'&filename='+encodeURIComponent(file.name)+'&recommend=false';
+    const path='/resume?profile_id='+encodeURIComponent(currentProfile)+'&filename='+encodeURIComponent(file.name)+'&recommend=false';
     const r=await protectedFetch(path,{method:'POST',headers:{'Content-Type':file.type||'application/octet-stream'},body:file});
     const d=await r.json();
     if(!r.ok)throw new Error(d.detail||'Resume upload failed');
+    if(version!==workspaceVersion||currentProfile!==profileId)return;
     renderProfile(d.profile);
     $('resumeStatus').textContent='Resume ready · '+(d.profile.skills||[]).length+' skills detected · review the profile below';
     $('searchStatus').textContent='Profile ready. Confirm your details and search when ready.';
@@ -282,22 +318,23 @@ for(const event of ['dragenter','dragover'])drop.addEventListener(event,e=>{e.pr
 for(const event of ['dragleave','drop'])drop.addEventListener(event,e=>{e.preventDefault();drop.classList.remove('drag')});
 drop.addEventListener('drop',e=>uploadResume(e.dataTransfer.files[0]));
 
-let searchRunning=false;
+let searchRunning=false,searchRequest=0;
 async function search(){
   if(searchRunning||!profileId)return;
   const query=$('query').value.trim();
   if(!query){$('searchStatus').textContent='Describe the roles you want to find.';return;}
-  const b=$('searchBtn');searchRunning=true;b.disabled=true;
+  const b=$('searchBtn'),version=workspaceVersion,currentProfile=profileId,request=++searchRequest;searchRunning=true;b.disabled=true;
   $('searchStatus').textContent='Searching the index and checking available matches…';
   $('agentActivity').hidden=true;
   try{
-    const d=await api('/agent',{profile_id:profileId,query,top_k:10});
+    const d=await api('/agent',{profile_id:currentProfile,query,top_k:10});
+    if(version!==workspaceVersion||currentProfile!==profileId)return;
     if(Array.isArray(d.matches))render(d.matches);
     else render([]);
     renderActivity(d);
     $('searchStatus').textContent=d.message||'Search returned '+(d.matches||[]).length+' results.';
-  }catch(e){$('searchStatus').textContent='Search could not complete: '+e.message+' · previous results retained.'}
-  finally{searchRunning=false;b.disabled=false}
+  }catch(e){if(version===workspaceVersion&&currentProfile===profileId)$('searchStatus').textContent='Search could not complete: '+e.message+' · previous results retained.'}
+  finally{if(request===searchRequest){searchRunning=false;b.disabled=false}}
 }
 $('searchBtn').onclick=search;
 $('query').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();search()}});
@@ -305,19 +342,25 @@ document.querySelectorAll('.quick button').forEach(btn=>btn.onclick=()=>{$('quer
 
 $('reviewProfile').onclick=async()=>{
   const split=id=>$(id).value.split(',').map(x=>x.trim()).filter(Boolean);
-  $('reviewProfile').disabled=true;
+  const version=workspaceVersion,currentProfile=profileId;$('reviewProfile').disabled=true;
   try{
-    const r=await protectedFetch('/candidate-profile/'+encodeURIComponent(profileId),{
+    const r=await protectedFetch('/candidate-profile/'+encodeURIComponent(currentProfile),{
       method:'PUT',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({target_roles:split('targetRoles'),skills:split('profileSkills'),reviewed:true})
     });
-    const d=await r.json();if(!r.ok)throw new Error(d.detail||'Profile update failed');renderProfile(d.profile);
-  }catch(e){$('profileStatus').textContent=e.message}finally{$('reviewProfile').disabled=false}
+    const d=await r.json();if(!r.ok)throw new Error(d.detail||'Profile update failed');
+    if(version===workspaceVersion&&currentProfile===profileId)renderProfile(d.profile);
+  }catch(e){if(version===workspaceVersion)$('profileStatus').textContent=e.message}finally{$('reviewProfile').disabled=false}
 };
 $('deleteProfile').onclick=async()=>{
   if(!confirm('Delete your extracted profile, preferences and feedback from your workspace?'))return;
-  const r=await protectedFetch('/candidate-profile/'+encodeURIComponent(profileId),{method:'DELETE'});
-  if(r.ok){activeProfile=null;hasProfile=false;$('profileChips').replaceChildren();$('profileEvidence').replaceChildren();$('targetRoles').value='';$('profileSkills').value='';$('prefs').value='';$('profileFile').textContent='';$('agentActivity').hidden=true;$('activitySteps').replaceChildren();$('profileCard').classList.remove('show');$('results').innerHTML='<div class="empty"><div><strong>Profile deleted.</strong>Upload a resume or search directly.</div></div>';}
+  const currentProfile=profileId,b=$('deleteProfile');workspaceVersion++;b.disabled=true;
+  try{
+    const r=await protectedFetch('/candidate-profile/'+encodeURIComponent(currentProfile),{method:'DELETE'});
+    let d={};try{d=await r.json()}catch(_){}
+    if(!r.ok)throw new Error(d.detail||'Profile deletion failed');
+    if(currentProfile===profileId)resetWorkspace('Profile deleted. Upload a resume or search directly.');
+  }catch(e){$('profileStatus').textContent=e.message}finally{b.disabled=false}
 };
 
 $('savePrefs').onclick=async()=>{
@@ -334,10 +377,11 @@ $('syncBtn').onclick=async()=>{
   }catch(e){$('syncStatus').textContent=e.message}finally{b.disabled=false}
 };
 
-async function restoreProfile(){
+async function restoreProfile(attempt=sessionAttempt,expectedProfile=profileId){
   try{
-    const r=await protectedFetch('/candidate-profile/'+encodeURIComponent(profileId));
+    const r=await protectedFetch('/candidate-profile/'+encodeURIComponent(expectedProfile));
     const d=await r.json();
+    if(attempt!==sessionAttempt||expectedProfile!==profileId)return;
     if(r.ok&&d.profile){renderProfile(d.profile);$('searchStatus').textContent='Saved profile loaded. Search when ready.'}
   }catch(_){}
 }
@@ -348,7 +392,7 @@ $('inviteForm').onsubmit=async e=>{
   $('inviteSubmit').disabled=true;
   try{await connect($('inviteToken').value.trim());}finally{$('inviteSubmit').disabled=false;}
 };
-$('signOut').onclick=()=>{inviteToken='';profileId=null;location.reload()};
+$('signOut').onclick=()=>{sessionAttempt++;inviteToken='';profileId=null;resetWorkspace();location.reload()};
 connect();
 </script>
 </body>

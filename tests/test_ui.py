@@ -1,6 +1,10 @@
 from fastapi.testclient import TestClient
 
-from boardforge.api import app
+import boardforge.api as api
+from boardforge.intelligent_agent import ToolCallingAgent
+
+
+app = api.app
 
 
 def test_root_serves_resume_first_boardforge_ui():
@@ -17,3 +21,7 @@ def test_root_serves_resume_first_boardforge_ui():
     assert "targetRoles" in response.text
     assert "scorePercent" not in response.text
     assert "relative rank" in response.text
+
+
+def test_api_agent_endpoint_is_wired_to_bounded_intelligent_agent():
+    assert isinstance(api.tool_agent, ToolCallingAgent)
