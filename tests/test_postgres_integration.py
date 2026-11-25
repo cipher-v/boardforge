@@ -1,4 +1,5 @@
 import os
+from urllib.parse import urlsplit
 from datetime import datetime, timezone
 
 import pytest
@@ -11,11 +12,44 @@ from boardforge.agent_live_eval import _usage_rows
 POSTGRES_URL = os.getenv("BOARDFORGE_TEST_POSTGRES_URL")
 
 
+def _assert_disposable_database(url: str) -> None:
+    # Destructive integration tests must never run against application databases.
+    parsed = urlsplit(url)
+    if (
+        parsed.scheme not in {"postgres", "postgresql"}
+        or parsed.hostname not in {"localhost", "127.0.0.1", "::1"}
+        or parsed.path != "/boardforge_test"
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise RuntimeError("Integration tests require the disposable local boardforge_test database")
+    application_url = os.getenv("DATABASE_URL", "")
+    if application_url and urlsplit(application_url).path == parsed.path:
+        raise RuntimeError("Integration database must differ from the application database")
+
+
+@pytest.mark.parametrize("url", [
+    "postgresql://localhost/boardforge",
+    "postgresql://localhost/boardforge_holdout_eval",
+    "postgresql://remote.example/boardforge_test",
+    "postgresql://localhost/boardforge_test?dbname=boardforge",
+])
+def test_destructive_integration_database_guard(url):
+    with pytest.raises(RuntimeError):
+        _assert_disposable_database(url)
+
+
+
 @pytest.mark.skipif(not POSTGRES_URL, reason="set BOARDFORGE_TEST_POSTGRES_URL for pgvector integration")
 def test_postgres_store_migrations_fts_vectors_and_state():
+    _assert_disposable_database(POSTGRES_URL)
     store = PostgresStore(POSTGRES_URL, min_size=1, max_size=2)
     try:
         with store.connect() as connection:
+            actual_database = connection.execute("SELECT current_database() AS name").fetchone()
+            # Check the server-reported database as well as the supplied URL.
+            if (actual_database["name"] if isinstance(actual_database, dict) else actual_database[0]) != "boardforge_test":
+                raise RuntimeError("Refusing to truncate a non-test database")
             connection.execute(
                 """TRUNCATE jobs,job_events,sync_runs,job_embeddings,profiles,
                    candidate_profiles,feedback,discovery_requests,discovered_sources,
