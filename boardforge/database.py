@@ -72,4 +72,6 @@ def create_store() -> StoreProtocol:
         from boardforge.postgres_store import PostgresStore
 
         return PostgresStore(database_url)
+    if os.getenv("K_SERVICE"):
+        raise RuntimeError("Cloud Run requires a PostgreSQL DATABASE_URL")
     return Store()
