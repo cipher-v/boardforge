@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass
 
 from boardforge.models import Job, Match, MatchEvidence, Preferences
-from boardforge.preferences import EXPERIENCE_CAP_RE
+from boardforge.preferences import EXPERIENCE_CAP_RE, extract_experience_floor, is_entry_level_query
 
 
 TOKEN_RE = re.compile(r"[a-zA-Z0-9+#.]{2,}")
@@ -15,9 +15,15 @@ TOKEN_RE = re.compile(r"[a-zA-Z0-9+#.]{2,}")
 # stand in for role/task alignment.
 GENERIC_QUERY_TERMS = {
     "a", "an", "and", "or", "the", "to", "for", "of", "in", "on", "with",
-    "job", "jobs", "role", "roles", "india", "remote", "onsite", "hybrid",
-    "only", "avoid", "exclude", "requiring", "require", "required", "more",
-    "than", "over", "above", "greater", "at", "most", "max", "maximum",
+    "job", "jobs", "role", "roles", "position", "positions", "work", "working",
+    "opening", "openings", "opportunity", "opportunities", "career", "careers",
+    "candidate", "candidates", "india", "remote", "onsite", "hybrid",
+    "worldwide", "anywhere", "global", "paid", "unpaid",
+    "now", "then", "please", "me", "my", "changed", "mind",
+    "only", "avoid", "exclude", "excluding", "without", "requiring", "require",
+    "required", "minimum", "least", "more",
+    "than", "over", "above", "greater", "at", "most", "max", "maximum", "under",
+    "below", "up",
     "years", "year", "yrs", "experience", "senior", "staff", "principal",
 }
 OCCUPATION_TERMS = {
@@ -53,7 +59,13 @@ SKILL_TERMS = {
 }
 LEADERSHIP_TITLE_RE = re.compile(
     r"\b(?:engineering|development|data|platform|software|product)\s+manager\b|"
-    r"\b(?:director|head|vp|vice president)\b",
+    r"\b(?:director|head|vp|vice president)\b|"
+    r"\bengineering\s+leader\b",
+    re.I,
+)
+SENIORITY_TITLE_RE = re.compile(
+    r"\b(?:senior|sr\.?|staff|principal|lead|director|head|vp|vice president|"
+    r"architect|distinguished|iii|iv|l[4-9]|p[4-9])\b",
     re.I,
 )
 ACCOUNT_MANAGER_RE = re.compile(r"\b(?:technical\s+)?account manager\b", re.I)
@@ -93,15 +105,26 @@ class RelevanceAssessment:
     reasons: tuple[str, ...]
 
 
+_NEGATED_CLAUSE_RE = re.compile(
+    r"\b(?:avoid|exclude|excluding|without|do\s+not\s+(?:show|include|want)|"
+    r"don't\s+(?:show|include|want)|dont\s+(?:show|include|want)|stop\s+showing|"
+    r"no\s+unpaid)\b[^.,;!?]*",
+    re.I,
+)
+
+
 def occupational_query_text(query: str) -> str:
-    """Remove search framing and eligibility phrases, not occupational evidence."""
+    """Remove search framing, negated exclusions, and eligibility phrases, not occupational evidence."""
     cleaned = EXPERIENCE_CAP_RE.sub(" ", query.casefold())
+    cleaned = _NEGATED_CLAUSE_RE.sub(" ", cleaned)
     for pattern in (
         r"\b(?:entry[- ]level|early[- ]career|freshers?|new grads?|recent graduates?)\b",
-        r"\b(?:i have|i've got)\s+no\s+(?:formal\s+)?(?:employment\s+|work\s+|professional\s+)?experience\b",
+        r"\b(?:(?:i\s+have|i've\s+got)\s+)?(?:for\s+candidates?\s+(?:with|without)\s+)?"
+        r"(?:no|zero|without)\s+(?:prior\s+|formal\s+)?(?:employment\s+|work\s+|professional\s+|industry\s+)?experience\b",
         r"\b(?:suitable for|matching|based on)\s+my\s+(?:profile|resume|cv|background)\b",
         r"\b(?:and\s+)?(?:clearly\s+)?flag\s+(?:any\s+)?(?:uncertain|unknown|unverified)\s+eligibility\b",
-        r"\b(?:find|search for|show me|include)\b",
+        r"\b(?:changed\s+my\s+mind|from\s+now\s+on|going\s+forward)\b",
+        r"\b(?:find|search(?:\s+for)?|show(?:\s+me)?|include|explore|look\s+for|list)\b",
     ):
         cleaned = re.sub(pattern, " ", cleaned)
     # Sentence punctuation is not a technical query term.
@@ -129,7 +152,12 @@ def parse_query_intent(preferences: Preferences, query: str) -> QueryIntent:
     role_terms = set().union(
         *(ROLE_TERMS.get(role, set()) for role in preferences.roles)
     ) if preferences.roles else set()
-    remaining = raw - role_terms - OCCUPATION_TERMS
+    avoided_tokens = {
+        tok
+        for term in preferences.avoid_terms
+        for tok in _tokens(term)
+    }
+    remaining = raw - role_terms - OCCUPATION_TERMS - avoided_tokens
     domains = remaining & DOMAIN_TERMS
     skills = remaining & SKILL_TERMS
     tasks = remaining - domains - skills
@@ -275,6 +303,25 @@ def enforce_recommendation_confidence(
         and not assessment.confident_topic
     ):
         uncertain_reasons.append("generic engineering title lacks coherent task evidence")
+
+    entry_level_target = (
+        (preferences.max_required_experience_years is not None
+         and preferences.max_required_experience_years <= 1.0)
+        or is_entry_level_query(query)
+    )
+    if entry_level_target and SENIORITY_TITLE_RE.search(match.job.title):
+        uncertain_reasons.append("seniority title conflicts with entry-level target")
+
+    min_floor = extract_experience_floor(query)
+    if min_floor is not None:
+        if match.job.min_experience_years is None:
+            uncertain_reasons.append(
+                f"minimum experience target ({min_floor:g}+ years) not verified in job metadata"
+            )
+        elif match.job.min_experience_years < min_floor:
+            uncertain_reasons.append(
+                f"stated experience ({match.job.min_experience_years:g}+ years) is below requested {min_floor:g}+ years"
+            )
 
     if uncertain_reasons:
         match.status = "needs_verification"

@@ -2,7 +2,20 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Literal
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, model_validator
+
+
+def _check_no_nul(value: object) -> None:
+    if isinstance(value, str):
+        if "\x00" in value:
+            raise ValueError("input must not contain NUL bytes")
+    elif isinstance(value, list):
+        for item in value:
+            _check_no_nul(item)
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            _check_no_nul(k)
+            _check_no_nul(v)
 
 
 RemotePolicy = Literal["onsite", "hybrid", "remote", "unknown"]
@@ -86,6 +99,13 @@ class CandidateProfileUpdate(BaseModel):
     domains: list[str] | None = None
     reviewed: bool = True
 
+    @model_validator(mode="after")
+    def _reject_nul(self) -> "CandidateProfileUpdate":
+        _check_no_nul(self.skills)
+        _check_no_nul(self.target_roles)
+        _check_no_nul(self.domains)
+        return self
+
 
 class MatchEvidence(BaseModel):
     kind: str
@@ -119,12 +139,24 @@ class SyncSummary(BaseModel):
 class SearchRequest(BaseModel):
     profile_id: str = "default"
     query: str = ""
-    top_k: int = 10
+    top_k: int = Field(default=10, ge=1, le=50)
+
+    @model_validator(mode="after")
+    def _reject_nul(self) -> "SearchRequest":
+        _check_no_nul(self.profile_id)
+        _check_no_nul(self.query)
+        return self
 
 
 class PreferenceUpdate(BaseModel):
     profile_id: str = "default"
     text: str
+
+    @model_validator(mode="after")
+    def _reject_nul(self) -> "PreferenceUpdate":
+        _check_no_nul(self.profile_id)
+        _check_no_nul(self.text)
+        return self
 
 
 class FeedbackRequest(BaseModel):
@@ -132,3 +164,10 @@ class FeedbackRequest(BaseModel):
     job_id: str
     verdict: Literal["save", "reject", "applied", "interview", "ignore"]
     note: str = ""
+
+    @model_validator(mode="after")
+    def _reject_nul(self) -> "FeedbackRequest":
+        _check_no_nul(self.profile_id)
+        _check_no_nul(self.job_id)
+        _check_no_nul(self.note)
+        return self

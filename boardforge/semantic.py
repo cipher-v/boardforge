@@ -14,10 +14,11 @@ from typing import Protocol
 import httpx
 
 from boardforge.database import StoreProtocol
-from boardforge.confidence import occupational_query_text
-from boardforge.matching import job_text, rank_jobs
+from boardforge.confidence import GENERIC_QUERY_TERMS, assess_query_relevance, occupational_query_text
+from boardforge.matching import _has_query_overlap, job_text, rank_jobs, tokens
 from boardforge.models import Job, Match, Preferences
 from boardforge.observability import observe_embedding_request
+from boardforge.preferences import extract_experience_floor, is_entry_level_query
 
 
 RETRIEVAL_QUERY = "RETRIEVAL_QUERY"
@@ -58,6 +59,53 @@ def semantic_query_text(preferences: Preferences, query: str = "") -> str:
     )
     parts = [*preferences.roles, *preferences.prefer_terms, " ".join(cleaned.split())]
     return " ".join(part for part in parts if part).strip()
+
+
+def lexical_query_text(preferences: Preferences, query: str = "") -> str:
+    """Build a PostgreSQL FTS query from explicit search intent without AND-ing soft resume terms."""
+    cleaned = occupational_query_text(query)
+    for term in [*preferences.countries, *preferences.locations]:
+        if term:
+            cleaned = re.sub(
+                rf"(?<!\w){re.escape(term)}(?!\w)",
+                " ",
+                cleaned,
+                flags=re.IGNORECASE,
+            )
+    cleaned = re.sub(
+        r"\b(?:remote|remote-only|onsite|on-site|onsite-only|hybrid)\b",
+        " ",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"\b\d+(?:\.\d+)?\s*(?:lpa|lakhs?|lakh)\b",
+        " ",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    explicit_tokens = [
+        tok for tok in tokens(cleaned)
+        if tok not in GENERIC_QUERY_TERMS
+    ]
+    role_tokens = [
+        tok
+        for role in preferences.roles
+        for tok in tokens(role.replace("/", " "))
+        if tok not in GENERIC_QUERY_TERMS
+    ]
+    if query.strip():
+        # Keep explicit search intent isolated from soft resume prefer_terms so
+        # websearch_to_tsquery never turns a 15-skill resume into an impossible AND.
+        combined = list(dict.fromkeys([*explicit_tokens, *role_tokens]))
+        return " or ".join(combined[:12])
+    soft_tokens = [
+        tok
+        for term in [*preferences.roles, *preferences.prefer_terms[:8]]
+        for tok in tokens(term.replace("/", " "))
+        if tok not in GENERIC_QUERY_TERMS
+    ]
+    return " or ".join(list(dict.fromkeys(soft_tokens))[:12])
 
 
 def query_embedding_cache_identity(query: str, client: "EmbeddingClient") -> tuple[str, str, str]:
@@ -401,11 +449,29 @@ async def hybrid_rank_jobs(
     query_vector: list[float] | None = None,
     query_embedding_attempted: bool = False,
 ) -> list[Match]:
+    if top_k <= 0:
+        return []
     baseline = rank_jobs(
-        jobs, prefs, query=query, top_k=len(jobs), rejected_ids=rejected_ids
+        jobs,
+        prefs,
+        query=query,
+        top_k=len(jobs),
+        rejected_ids=rejected_ids,
+        allow_semantic_candidates=client.enabled,
     )
     if not baseline or not client.enabled:
         return baseline[:top_k]
+
+    def _deterministic_fallback(candidates: list[Match]) -> list[Match]:
+        if not query.strip():
+            return candidates[:top_k]
+        filtered = [
+            m for m in candidates
+            if _has_query_overlap(
+                m.job, prefs, query, m.evidence, assess_query_relevance(m.job, prefs, query)
+            )
+        ]
+        return filtered[:top_k]
 
     if query_vector is not None:
         qv = query_vector
@@ -413,13 +479,13 @@ async def hybrid_rank_jobs(
         # retrieve_and_rank_jobs already tried this exact query. A provider
         # failure must degrade once to deterministic ranking, not trigger a
         # duplicate paid request from the hybrid rescoring layer.
-        return baseline[:top_k]
+        return _deterministic_fallback(baseline)
     else:
         qtext = semantic_query_text(prefs, query)
         try:
             qv = (await client.embed([qtext], task_type=RETRIEVAL_QUERY))[0]
         except Exception:
-            return baseline[:top_k]
+            return _deterministic_fallback(baseline)
 
     documents = [job_text(match.job)[:6000] for match in baseline]
     vectors: list[list[float] | None] = [None] * len(documents)
@@ -450,7 +516,7 @@ async def hybrid_rank_jobs(
                 task_type=RETRIEVAL_DOCUMENT,
             )
         except Exception:
-            return baseline[:top_k]
+            return _deterministic_fallback(baseline)
         if len(embedded) != len(missing_indexes):
             raise RuntimeError(
                 "embedding provider returned an unexpected vector count"
@@ -458,11 +524,26 @@ async def hybrid_rank_jobs(
         for index, vector in zip(missing_indexes, embedded):
             vectors[index] = vector
 
+    entry_level_target = (
+        (prefs.max_required_experience_years is not None
+         and prefs.max_required_experience_years <= 1.0)
+        or is_entry_level_query(query)
+    )
+    from boardforge.confidence import SENIORITY_TITLE_RE
+
     rescored = []
     for match, vector in zip(baseline, vectors):
         if vector is None:
             # Keep the deterministic lexical/evidence result while the offline
-            # embedding index catches up. Do not make hidden provider calls.
+            # embedding index catches up, excluding zero-overlap non-semantic rows.
+            if query.strip() and not _has_query_overlap(
+                match.job,
+                prefs,
+                query,
+                match.evidence,
+                assess_query_relevance(match.job, prefs, query),
+            ):
+                continue
             rescored.append(match)
             continue
         semantic = cosine(qv, vector)
@@ -477,6 +558,7 @@ async def hybrid_rank_jobs(
         key=lambda match: (
             bool(match.hard_violations),
             match.status == "needs_verification",
+            (entry_level_target and bool(SENIORITY_TITLE_RE.search(match.job.title))),
             (prefs.max_required_experience_years is not None
              and match.job.min_experience_years is None),
             -match.score,
@@ -499,6 +581,8 @@ async def retrieve_and_rank_jobs(
 ) -> tuple[list[Match], dict]:
     total_started = time.perf_counter()
     retrieval_query = semantic_query_text(prefs, query)
+    lexical_query = lexical_query_text(prefs, query)
+    min_floor = extract_experience_floor(query) if query.strip() else None
     query_vector: list[float] | None = None
     semantic_retrieval = False
     embedding_error: str | None = None
@@ -547,7 +631,7 @@ async def retrieve_and_rank_jobs(
 
     database_started = time.perf_counter()
     jobs = store.candidate_jobs(
-        retrieval_query,
+        lexical_query,
         limit=candidate_limit,
         query_vector=query_vector,
         embedding_model=client.model if query_vector is not None else "",
@@ -576,6 +660,11 @@ async def retrieve_and_rank_jobs(
         "query_embedding_source": query_embedding_source,
         "embedding_model": client.model if client.enabled else None,
         "embedding_error": embedding_error,
+        "lexical_query": lexical_query,
+        "unsupported_constraints": (
+            [f"minimum_experience_years>={min_floor:g}"]
+            if min_floor is not None else []
+        ),
         "latency_ms": {
             "query_embedding": round(query_embedding_ms, 2),
             "database_retrieval": round(database_ms, 2),

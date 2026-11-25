@@ -45,6 +45,9 @@ class JobAgent:
         self, profile_id: str, query: str = "", top_k: int = 10,
         *, deadline_monotonic: float | None = None, original_query: str | None = None,
     ) -> AgentResult:
+        if "\x00" in query or "\x00" in profile_id:
+            raise ValueError("input must not contain NUL bytes")
+        top_k = max(1, min(int(top_k), 50))
         saved = self.store.load_preferences(profile_id)
         prefs = effective_search_preferences(saved, query) if query else saved
         if original_query is not None:
@@ -89,6 +92,7 @@ class JobAgent:
 
     async def recommend_jobs(self, profile_id: str, top_k: int = 15) -> AgentResult:
         """Resume-led recommendations that stay within relevant role families."""
+        top_k = max(1, min(int(top_k), 50))
         saved = self.store.load_preferences(profile_id)
         candidate_profile = self.store.load_candidate_profile(profile_id)
         if candidate_profile is None:
@@ -140,6 +144,7 @@ class JobAgent:
         return AgentResult("Feedback recorded.", req.model_dump())
 
     async def handle(self, profile_id: str, text: str, top_k: int = 10) -> AgentResult:
+        top_k = max(1, min(int(top_k), 50))
         data: dict = {"trace": []}
         executed: list[str] = []
         for planned in plan_tools(text, top_k=top_k):

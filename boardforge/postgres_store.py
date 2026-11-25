@@ -14,6 +14,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
+from boardforge.enrich import infer_country
 from boardforge.matching import job_text
 from boardforge.semantic import POSTGRES_EMBEDDING_DIMENSIONS
 from boardforge.models import CandidateProfile, FeedbackRequest, Job, Preferences, SyncSummary
@@ -276,10 +277,20 @@ class PostgresStore:
             )
             params.append(preferences.locations)
             if preferences.remote_ok:
-                location_clause = (
-                    f"({location_clause} OR "
-                    f"COALESCE({alias}.payload->>'remote_policy','unknown')='remote')"
-                )
+                inferred_countries = sorted({
+                    c.casefold()
+                    for c in (infer_country(loc) for loc in preferences.locations)
+                    if c
+                })
+                if inferred_countries:
+                    remote_branch = (
+                        f"(COALESCE({alias}.payload->>'remote_policy','unknown')='remote' "
+                        f"AND lower(COALESCE({alias}.payload->>'country','')) = ANY(%s))"
+                    )
+                    params.append(inferred_countries)
+                else:
+                    remote_branch = f"COALESCE({alias}.payload->>'remote_policy','unknown')='remote'"
+                location_clause = f"({location_clause} OR {remote_branch})"
             clauses.append(location_clause)
 
         if preferences.max_required_experience_years is not None:
@@ -334,6 +345,8 @@ class PostgresStore:
         embedding_model: str = "",
         preferences: Preferences | None = None,
     ) -> list[Job]:
+        if "\x00" in query:
+            raise ValueError("search query must not contain NUL bytes")
         limit = max(1, min(limit, 2000))
         if query_vector is not None and len(query_vector) != POSTGRES_EMBEDDING_DIMENSIONS:
             raise ValueError(
@@ -426,6 +439,8 @@ class PostgresStore:
         Indexes are reported only when an executed plan node names them. This
         intentionally does not infer utilization from pg_indexes.
         """
+        if "\x00" in query:
+            raise ValueError("search query must not contain NUL bytes")
         limit = max(1, min(limit, 2000))
         if query_vector is not None and len(query_vector) != POSTGRES_EMBEDDING_DIMENSIONS:
             raise ValueError(
@@ -685,6 +700,11 @@ class PostgresStore:
                 "SELECT preferences FROM profiles WHERE profile_id=%s", (profile_id,)
             ).fetchone()
         return Preferences.model_validate(row["preferences"]) if row else Preferences()
+
+    def reset_preferences(self, profile_id: str) -> None:
+        """Clear saved preferences for a profile without deleting its resume or feedback."""
+        with self.connect() as connection:
+            connection.execute("DELETE FROM profiles WHERE profile_id=%s", (profile_id,))
 
     def save_candidate_profile(self, profile_id: str, profile: CandidateProfile) -> None:
         with self.connect() as connection:

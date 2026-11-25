@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, HttpUrl
 
@@ -16,6 +16,7 @@ from boardforge.models import (
     CandidateProfile,
     CandidateProfileUpdate,
     FeedbackRequest,
+    Preferences,
     PreferenceUpdate,
     SearchRequest,
 )
@@ -40,7 +41,7 @@ app.middleware("http")(request_observability)
 async def private_response_cache_control(request: Request, call_next):
     response = await call_next(request)
     private_prefixes = (
-        "/candidate-profile/", "/recommendations/", "/discovery/",
+        "/candidate-profile/", "/recommendations/", "/discovery/", "/preferences/",
     )
     if request.url.path == "/session" or request.url.path.startswith(private_prefixes):
         response.headers["Cache-Control"] = "no-store, private"
@@ -48,6 +49,11 @@ async def private_response_cache_control(request: Request, call_next):
         vary.add("Authorization")
         response.headers["Vary"] = ", ".join(sorted(vary))
     return response
+
+
+def _reject_nul_param(*values: str) -> None:
+    if any("\x00" in value for value in values):
+        raise HTTPException(status_code=400, detail="input must not contain NUL bytes")
 
 
 class SyncRequest(BaseModel):
@@ -158,6 +164,7 @@ async def upload_resume(
     filename: str = "resume.pdf",
     recommend: bool = True,
 ):
+    _reject_nul_param(profile_id, filename)
     authorize_profile(request, profile_id)
     data = await _read_limited_body(request, 5 * 1024 * 1024)
     if not data:
@@ -182,6 +189,7 @@ async def upload_resume(
 
 @app.get("/candidate-profile/{profile_id}")
 def candidate_profile(profile_id: str, request: Request):
+    _reject_nul_param(profile_id)
     authorize_profile(request, profile_id)
     profile = store.load_candidate_profile(profile_id)
     return {"profile": profile.model_dump() if profile else None}
@@ -189,6 +197,7 @@ def candidate_profile(profile_id: str, request: Request):
 
 @app.put("/candidate-profile/{profile_id}")
 def update_candidate_profile(profile_id: str, req: CandidateProfileUpdate, request: Request):
+    _reject_nul_param(profile_id)
     authorize_profile(request, profile_id)
     profile = store.load_candidate_profile(profile_id)
     if profile is None:
@@ -208,15 +217,21 @@ def update_candidate_profile(profile_id: str, req: CandidateProfileUpdate, reque
 
 @app.delete("/candidate-profile/{profile_id}")
 def delete_candidate_profile(profile_id: str, request: Request):
+    _reject_nul_param(profile_id)
     authorize_profile(request, profile_id)
     store.delete_profile(profile_id)
     return {"deleted": True, "profile_id": profile_id}
 
 
 @app.get("/recommendations/{profile_id}")
-async def recommendations(profile_id: str, request: Request, top_k: int = 15):
+async def recommendations(
+    profile_id: str,
+    request: Request,
+    top_k: int = Query(default=15, ge=1, le=50),
+):
+    _reject_nul_param(profile_id)
     authorize_profile(request, profile_id)
-    result = await core_agent.recommend_jobs(profile_id, max(1, min(top_k, 50)))
+    result = await core_agent.recommend_jobs(profile_id, top_k)
     return result.data
 
 
@@ -228,6 +243,7 @@ async def discover(
     request: Request,
 ):
     # req.profile_id is ignored here; ownership follows the path parameter.
+    _reject_nul_param(profile_id)
     authorize_profile(request, profile_id)
     profile = store.load_candidate_profile(profile_id) or CandidateProfile()
     result = await core_agent.search_jobs(profile_id, req.query, req.top_k)
@@ -250,6 +266,28 @@ def discovery_status(request_id: int, request: Request):
 def sources(request: Request):
     authorize_admin(request)
     return {"sources": store.discovered_sources()}
+
+
+@app.get("/preferences/{profile_id}")
+def get_preferences(profile_id: str, request: Request):
+    _reject_nul_param(profile_id)
+    authorize_profile(request, profile_id)
+    return {
+        "profile_id": profile_id,
+        "preferences": store.load_preferences(profile_id).model_dump(),
+    }
+
+
+@app.delete("/preferences/{profile_id}")
+def reset_preferences(profile_id: str, request: Request):
+    _reject_nul_param(profile_id)
+    authorize_profile(request, profile_id)
+    store.reset_preferences(profile_id)
+    return {
+        "reset": True,
+        "profile_id": profile_id,
+        "preferences": Preferences().model_dump(),
+    }
 
 
 @app.post("/preferences")
@@ -276,4 +314,4 @@ async def feedback(req: FeedbackRequest, request: Request):
 @app.post("/agent")
 async def agent_turn(req: SearchRequest, request: Request):
     authorize_profile(request, req.profile_id)
-    return await tool_agent.run(req.profile_id, req.query)
+    return await tool_agent.run(req.profile_id, req.query, top_k=req.top_k)

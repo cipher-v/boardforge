@@ -45,6 +45,11 @@ window.fetch=(path,options={})=>{
     return response(200,{profile:{...profileA,resume_filename:'A Private.pdf'}},window.__profileADelay);
   }
   if(String(path).startsWith('/candidate-profile/profile-b'))return response(200,{profile:null});
+  if(path==='/preferences/profile-a'){
+    if(method==='DELETE')return response(200,{reset:true,profile_id:'profile-a',preferences:{roles:[],locations:[],countries:[],remote_ok:true,onsite_ok:true,min_salary_lpa:null,max_required_experience_years:null,paid_only:false,avoid_terms:[],prefer_terms:[],notes:[]}});
+    return response(200,{profile_id:'profile-a',preferences:{roles:[],locations:[],countries:['India'],remote_ok:true,onsite_ok:true,min_salary_lpa:null,max_required_experience_years:1,paid_only:true,avoid_terms:[],prefer_terms:[],notes:[]}});
+  }
+  if(path==='/preferences/profile-b')return response(200,{profile_id:'profile-b',preferences:{roles:[],locations:[],countries:[],remote_ok:true,onsite_ok:true,min_salary_lpa:null,max_required_experience_years:null,paid_only:false,avoid_terms:[],prefer_terms:[],notes:[]}});
   if(String(path).startsWith('/resume'))return response(200,{profile:{...profileA,resume_filename:'new.pdf'}},30);
   if(path==='/agent'){
     window.__agentCalls++;
@@ -119,8 +124,10 @@ HARNESS = r"""
     await waitFor(()=>!document.getElementById('profileCard').classList.contains('show'),'profile deletion');
     assert(document.getElementById('searchStatus').textContent.includes('Profile deleted'),'delete confirmation missing');
 
-    const protectedCalls=window.__calls.filter(x=>x.path!=='/health'&&x.path!=='/session'&&x.path!=='/candidate-profile/profile-b');
+    const protectedCalls=window.__calls.filter(x=>x.path!=='/health'&&x.path!=='/session'&&!x.path.endsWith('/profile-b'));
     assert(protectedCalls.every(x=>x.auth==='Bearer token-a'),'protected request omitted invite token');
+    const profileBCalls=window.__calls.filter(x=>x.path.endsWith('/profile-b'));
+    assert(profileBCalls.length>=2&&profileBCalls.every(x=>x.auth==='Bearer token-b'),'profile-b request omitted token-b');
     document.body.dataset.auditResult='pass';
     document.body.dataset.auditCalls=String(window.__calls.length);
   }catch(error){document.body.dataset.auditResult='fail: '+error.message}

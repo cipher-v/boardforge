@@ -147,11 +147,16 @@ class AgentToolExecutor:
 
     @staticmethod
     def _explicit_preference_authorization(user_text: str, quote: str) -> bool:
-        if quote not in user_text:
+        from boardforge.planning import _is_explicit_preference_update
+
+        if not quote.strip() or quote not in user_text:
+            return False
+        if not _is_explicit_preference_update(user_text):
             return False
         return bool(re.search(
             r"\b(?:only|must|do not|don't|dont|avoid|exclude|remove|from now on|"
-            r"changed my mind|prefer|want|minimum|remote|onsite|hybrid|worldwide)\b",
+            r"anymore|remember|save|update|changed my mind|prefer|want|need|"
+            r"minimum|at least|remote|onsite|on-site|hybrid|worldwide)\b",
             quote, re.I,
         ))
 

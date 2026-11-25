@@ -117,8 +117,9 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
     <div class="advanced-grid">
       <div class="box">
         <div class="label">Explicit preferences</div>
+        <div class="chips" id="activePrefs" style="margin:0 0 8px"></div>
         <textarea id="prefs" placeholder="e.g. India only, avoid unpaid roles, max 1 year experience"></textarea>
-        <div class="row"><button class="btn primary" id="savePrefs">Save preferences</button></div>
+        <div class="row"><button class="btn primary" id="savePrefs">Save preferences</button><button class="btn" id="resetPrefs" type="button">Reset preferences</button></div>
         <div class="status" id="prefStatus"></div>
       </div>
       <div class="box" id="sourceAdmin" hidden>
@@ -197,26 +198,66 @@ function resetWorkspace(message='Upload a resume for recommendations, or search 
   searchRequest++;searchRunning=false;$('searchBtn').disabled=false;
   activeProfile=null;hasProfile=false;
   $('profileChips').replaceChildren();$('profileEvidence').replaceChildren();
-  $('targetRoles').value='';$('profileSkills').value='';$('prefs').value='';
+  $('targetRoles').value='';$('profileSkills').value='';$('prefs').value='';$('prefStatus').textContent='';
+  renderPreferences(null);
   $('profileFile').textContent='';$('profileCard').classList.remove('show');
   $('agentActivity').hidden=true;$('activitySteps').replaceChildren();
   $('searchStatus').textContent=message;
   $('results').innerHTML='<div class="empty"><div><strong>No recommendations yet.</strong>Upload your resume or search for a role.</div></div>';
 }
+function formatApiError(data,fallback='Request failed'){
+  if(!data)return fallback;
+  const detail=data.detail!==undefined?data.detail:data.message;
+  if(typeof detail==='string'&&detail.trim())return detail;
+  if(Array.isArray(detail)&&detail.length){
+    return detail.map(item=>{
+      if(typeof item==='string')return item;
+      const loc=Array.isArray(item?.loc)?item.loc.filter(x=>x!=='body'&&x!=='query'&&x!=='path').join('.'):'';
+      const msg=item?.msg||item?.message||'Invalid input';
+      return loc?`${loc}: ${msg}`:msg;
+    }).join('; ');
+  }
+  if(detail&&typeof detail==='object')return detail.msg||detail.message||fallback;
+  return fallback;
+}
 async function api(path,body){
   const r=await protectedFetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   let data={};try{data=await r.json()}catch(_){data={}}
-  if(!r.ok) throw new Error(data.detail||data.message||'Request failed');
+  if(!r.ok) throw new Error(formatApiError(data));
   return data;
 }
 const esc=(v='')=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const stableId=j=>j.stable_id||[j.source_kind,j.source_key,j.external_id].join(':');
 const safeUrl=value=>{try{const url=new URL(value);return ['http:','https:'].includes(url.protocol)?url.href:''}catch(_){return ''}};
 const statusLabel=s=>({recommended:'Recommended',alternative:'Alternative',needs_verification:'Needs verification',rejected:'Not recommended'}[s]||'Unverified');
+function renderPreferences(prefs){
+  const el=$('activePrefs'),resetBtn=$('resetPrefs');
+  if(!el)return;
+  const chips=[];
+  if(prefs&&typeof prefs==='object'){
+    for(const r of (prefs.roles||[]))chips.push('<span class="chip role">Role: '+esc(r)+'</span>');
+    for(const c of (prefs.countries||[]))chips.push('<span class="chip">Country: '+esc(c)+'</span>');
+    for(const l of (prefs.locations||[]))chips.push('<span class="chip">City: '+esc(l)+'</span>');
+    if(prefs.remote_ok===true&&prefs.onsite_ok===false)chips.push('<span class="chip">Remote only</span>');
+    else if(prefs.remote_ok===false&&prefs.onsite_ok===true)chips.push('<span class="chip">Onsite only</span>');
+    if(prefs.max_required_experience_years!=null)chips.push('<span class="chip">Max '+esc(prefs.max_required_experience_years)+' yrs exp</span>');
+    if(prefs.min_salary_lpa!=null)chips.push('<span class="chip">Min '+esc(prefs.min_salary_lpa)+' LPA</span>');
+    if(prefs.paid_only)chips.push('<span class="chip">Paid only</span>');
+    for(const a of (prefs.avoid_terms||[]))chips.push('<span class="chip">Avoid: '+esc(a)+'</span>');
+  }
+  if(chips.length){
+    el.innerHTML=chips.join('');
+    const adv=document.querySelector('details.advanced');if(adv)adv.open=true;
+    if(resetBtn)resetBtn.disabled=false;
+  }else{
+    el.innerHTML='<span class="hint" style="margin:0">No saved durable preferences.</span>';
+    if(resetBtn)resetBtn.disabled=false;
+  }
+}
 function renderActivity(d){
   const trace=Array.isArray(d.trace)?d.trace:[];
-  const labels={search_indexed_jobs:'Searched the indexed jobs',discover_job_sources:'Requested source discovery',synchronize_trusted_source:'Synchronized a trusted source',update_preferences:'Updated preferences',record_job_feedback:'Recorded feedback'};
-  const items=trace.map(t=>'<li>'+esc(labels[t.tool]||t.tool||'Tool operation')+(t.ok?'':' — not completed')+(t.arguments?.query?' · '+esc(t.arguments.query):'')+'</li>');
+  const labels={search_indexed_jobs:'Searched the indexed jobs',search_jobs:'Searched the indexed jobs',discover_job_sources:'Requested source discovery',synchronize_trusted_source:'Synchronized a trusted source',update_preferences:'Updated preferences',record_job_feedback:'Recorded feedback',record_feedback:'Recorded feedback'};
+  const items=trace.map(t=>'<li>'+esc(labels[t.tool]||t.tool||'Tool operation')+(t.ok===false?' — not completed':'')+(t.arguments?.query?' · '+esc(t.arguments.query):'')+'</li>');
   if(d.agent?.stopped_reason)items.push('<li>Stopped: '+esc(d.agent.stopped_reason.replaceAll('_',' '))+'</li>');
   $('activitySteps').innerHTML=items.join('');
   $('agentActivity').hidden=!items.length;
@@ -303,8 +344,8 @@ async function uploadResume(file){
   try{
     const path='/resume?profile_id='+encodeURIComponent(currentProfile)+'&filename='+encodeURIComponent(file.name)+'&recommend=false';
     const r=await protectedFetch(path,{method:'POST',headers:{'Content-Type':file.type||'application/octet-stream'},body:file});
-    const d=await r.json();
-    if(!r.ok)throw new Error(d.detail||'Resume upload failed');
+    let d={};try{d=await r.json()}catch(_){d={}}
+    if(!r.ok)throw new Error(formatApiError(d,'Resume upload failed'));
     if(version!==workspaceVersion||currentProfile!==profileId)return;
     renderProfile(d.profile);
     $('resumeStatus').textContent='Resume ready · '+(d.profile.skills||[]).length+' skills detected · review the profile below';
@@ -329,6 +370,7 @@ async function search(){
   try{
     const d=await api('/agent',{profile_id:currentProfile,query,top_k:10});
     if(version!==workspaceVersion||currentProfile!==profileId)return;
+    if(d.preferences)renderPreferences(d.preferences);
     if(Array.isArray(d.matches))render(d.matches);
     else render([]);
     renderActivity(d);
@@ -348,7 +390,7 @@ $('reviewProfile').onclick=async()=>{
       method:'PUT',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({target_roles:split('targetRoles'),skills:split('profileSkills'),reviewed:true})
     });
-    const d=await r.json();if(!r.ok)throw new Error(d.detail||'Profile update failed');
+    const d=await r.json();if(!r.ok)throw new Error(formatApiError(d,'Profile update failed'));
     if(version===workspaceVersion&&currentProfile===profileId)renderProfile(d.profile);
   }catch(e){if(version===workspaceVersion)$('profileStatus').textContent=e.message}finally{$('reviewProfile').disabled=false}
 };
@@ -358,16 +400,37 @@ $('deleteProfile').onclick=async()=>{
   try{
     const r=await protectedFetch('/candidate-profile/'+encodeURIComponent(currentProfile),{method:'DELETE'});
     let d={};try{d=await r.json()}catch(_){}
-    if(!r.ok)throw new Error(d.detail||'Profile deletion failed');
+    if(!r.ok)throw new Error(formatApiError(d,'Profile deletion failed'));
     if(currentProfile===profileId)resetWorkspace('Profile deleted. Upload a resume or search directly.');
   }catch(e){$('profileStatus').textContent=e.message}finally{b.disabled=false}
 };
 
 $('savePrefs').onclick=async()=>{
-  const b=$('savePrefs');b.disabled=true;$('prefStatus').textContent='Saving…';
-  try{await api('/preferences',{profile_id:profileId,text:$('prefs').value});$('prefStatus').textContent='Preferences saved'}
-  catch(e){$('prefStatus').textContent=e.message}finally{b.disabled=false}
+  const b=$('savePrefs'),version=workspaceVersion,currentProfile=profileId;b.disabled=true;$('prefStatus').textContent='Saving…';
+  try{
+    const d=await api('/preferences',{profile_id:currentProfile,text:$('prefs').value});
+    if(version===workspaceVersion&&currentProfile===profileId){
+      renderPreferences(d.preferences);
+      $('prefs').value='';
+      $('prefStatus').textContent='Preferences saved';
+    }
+  }catch(e){if(version===workspaceVersion)$('prefStatus').textContent=e.message}finally{b.disabled=false}
 };
+$('resetPrefs').onclick=async()=>{
+  if(!profileId)return;
+  const b=$('resetPrefs'),version=workspaceVersion,currentProfile=profileId;b.disabled=true;$('prefStatus').textContent='Resetting…';
+  try{
+    const r=await protectedFetch('/preferences/'+encodeURIComponent(currentProfile),{method:'DELETE'});
+    let d={};try{d=await r.json()}catch(_){d={}}
+    if(!r.ok)throw new Error(formatApiError(d,'Preference reset failed'));
+    if(version===workspaceVersion&&currentProfile===profileId){
+      renderPreferences(d.preferences);
+      $('prefs').value='';
+      $('prefStatus').textContent='Preferences reset';
+    }
+  }catch(e){if(version===workspaceVersion)$('prefStatus').textContent=e.message}finally{b.disabled=false}
+};
+
 $('syncBtn').onclick=async()=>{
   const b=$('syncBtn');b.disabled=true;$('syncStatus').textContent='Syncing…';
   try{
@@ -379,9 +442,14 @@ $('syncBtn').onclick=async()=>{
 
 async function restoreProfile(attempt=sessionAttempt,expectedProfile=profileId){
   try{
-    const r=await protectedFetch('/candidate-profile/'+encodeURIComponent(expectedProfile));
+    const [r,pr]=await Promise.all([
+      protectedFetch('/candidate-profile/'+encodeURIComponent(expectedProfile)),
+      protectedFetch('/preferences/'+encodeURIComponent(expectedProfile)).catch(()=>null),
+    ]);
     const d=await r.json();
+    let pd=null;if(pr&&pr.ok){try{pd=await pr.json()}catch(_){pd=null}}
     if(attempt!==sessionAttempt||expectedProfile!==profileId)return;
+    if(pd&&pd.preferences)renderPreferences(pd.preferences);
     if(r.ok&&d.profile){renderProfile(d.profile);$('searchStatus').textContent='Saved profile loaded. Search when ready.'}
   }catch(_){}
 }

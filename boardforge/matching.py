@@ -5,13 +5,17 @@ import re
 from collections import Counter
 
 from boardforge.confidence import (
+    LEADERSHIP_TITLE_RE,
+    SENIORITY_TITLE_RE,
     assess_query_relevance,
     enforce_recommendation_confidence,
+    occupational_query_text,
     parse_query_intent,
     query_evidence_items,
 )
-from boardforge.enrich import salary_min_lpa
+from boardforge.enrich import infer_country, salary_min_lpa
 from boardforge.models import Job, Match, MatchEvidence, Preferences
+from boardforge.preferences import extract_experience_floor, is_entry_level_query
 
 
 WORD_RE = re.compile(r"[a-zA-Z0-9+#.]{2,}")
@@ -40,10 +44,22 @@ ROLE_PATTERNS: dict[str, tuple[str, ...]] = {
         r"\bsoftware engineer\b", r"\bsoftware developer\b",
         r"\bapplication developer\b", r"\bfull[- ]stack\b",
     ),
-    "Data Engineering": (r"\bdata engineer\b", r"\banalytics engineer\b", r"\betl engineer\b"),
+    "Data Engineering": (
+        r"\bdata engineer\b", r"\bdata engineering\b",
+        r"\banalytics engineer\b", r"\betl engineer\b",
+    ),
     "Data Science": (r"\bdata scientist\b", r"\bdata science\b", r"\bdecision scientist\b"),
     "QA": (r"\bqa\b", r"\btest engineer\b", r"\bquality assurance\b", r"\bsdet\b"),
 }
+
+_QA_TITLE_RE = re.compile(
+    r"\b(?:sdet|qa|quality\s+assurance|test(?:ing)?\s+engineer|engineer\s+in\s+test|quality\s+engineer)\b",
+    re.I,
+)
+_FRONTEND_FOCUSED_TITLE_RE = re.compile(
+    r"\b(?:front[- ]?end|ui|ux|mobile|ios|android)(?:[- ]+(?:focused|first|only|specialist))?\b",
+    re.I,
+)
 
 
 def tokens(text: str) -> list[str]:
@@ -175,8 +191,15 @@ def query_topic_evidence(
 
 def role_evidence(job: Job, role: str) -> MatchEvidence | None:
     title = " ".join(job.title.lower().split())
+    if LEADERSHIP_TITLE_RE.search(title):
+        return None
     if role == "AI/ML" and re.search(r"\b(?:hardware|embedded|firmware)\b", title, re.I):
         return None
+    if role == "Backend":
+        if _QA_TITLE_RE.search(title):
+            return None
+        if not re.search(r"\bback[- ]?end\b", title, re.I) and _FRONTEND_FOCUSED_TITLE_RE.search(title):
+            return None
     patterns = ROLE_PATTERNS.get(role)
     if patterns:
         for pattern in patterns:
@@ -209,7 +232,20 @@ def hard_violations(job: Job, preferences: Preferences) -> list[str]:
         location_match = bool(job.location) and any(
             location.casefold() in job.location.casefold() for location in preferences.locations
         )
-        remote_match = preferences.remote_ok and job.remote_policy == "remote"
+        inferred_countries = {
+            country.casefold()
+            for country in (infer_country(loc) for loc in preferences.locations)
+            if country
+        }
+        country_compatible = (
+            not inferred_countries
+            or (bool(job.country) and job.country.casefold() in inferred_countries)
+        )
+        remote_match = (
+            preferences.remote_ok
+            and job.remote_policy == "remote"
+            and country_compatible
+        )
         if not location_match and not remote_match:
             violations.append("location_unknown" if not job.location else "location")
 
@@ -301,14 +337,64 @@ def evidence(job: Job, preferences: Preferences) -> tuple[list[str], list[str], 
     return reasons, risks, sum(item.weight for item in items), items
 
 
+def _has_query_overlap(
+    job: Job,
+    preferences: Preferences,
+    query: str,
+    structured_evidence: list[MatchEvidence],
+    assessment,
+) -> bool:
+    """Return False when an explicit search query has zero lexical or role overlap with a job."""
+    if not query.strip():
+        return True
+    if preferences.roles:
+        return any(item.kind == "role" for item in structured_evidence)
+    if assessment is not None:
+        if assessment.matched_terms:
+            return True
+        if assessment.intent.leadership and LEADERSHIP_TITLE_RE.search(job.title):
+            return True
+        if (
+            (assessment.intent.domain_terms or assessment.intent.skill_terms)
+            and _generic_engineering_title(job.title)
+        ):
+            return True
+        if assessment.intent.specific_terms:
+            return False
+    cleaned = occupational_query_text(query)
+    for term in [*preferences.countries, *preferences.locations]:
+        if term:
+            cleaned = re.sub(rf"(?<!\w){re.escape(term.casefold())}(?!\w)", " ", cleaned)
+    cleaned = re.sub(r"\b(?:remote|remote-only|onsite|on-site|onsite-only|hybrid)\b", " ", cleaned)
+    if not tokens(cleaned):
+        return True
+    return _cosine_overlap(cleaned, job_text(job)) > 0.0
+
+
 def rank_jobs(
     jobs: list[Job],
     preferences: Preferences,
     query: str = "",
     top_k: int = 10,
     rejected_ids: set[str] | None = None,
+    *,
+    allow_semantic_candidates: bool = False,
 ) -> list[Match]:
+    if top_k <= 0:
+        return []
     rejected_ids = rejected_ids or set()
+    entry_level_target = (
+        (preferences.max_required_experience_years is not None
+         and preferences.max_required_experience_years <= 1.0)
+        or is_entry_level_query(query)
+    )
+    min_floor = extract_experience_floor(query) if query.strip() else None
+    low_query = query.casefold()
+    explicit_remote_requested = (
+        bool(re.search(r"\bremote\b", low_query))
+        and not bool(re.search(r"\b(?:on[- ]?site|hybrid)\b", low_query))
+    )
+
     matches: list[Match] = []
     for job in jobs:
         if job.stable_id in rejected_ids:
@@ -317,6 +403,7 @@ def rank_jobs(
         if violations:
             continue
         reasons, risks, bonus, structured_evidence = evidence(job, preferences)
+        assessment = None
         if query.strip():
             assessment = assess_query_relevance(job, preferences, query)
             intent_items = query_evidence_items(assessment)
@@ -327,8 +414,22 @@ def rank_jobs(
             item.kind == "role" for item in structured_evidence
         ):
             continue
+        if not allow_semantic_candidates and not _has_query_overlap(
+            job, preferences, query, structured_evidence, assessment
+        ):
+            continue
+
         score = lexical_score(job, preferences, query) + bonus
         status = "recommended"
+
+        if explicit_remote_requested:
+            if job.remote_policy == "remote":
+                score += 0.08
+            elif job.remote_policy == "onsite":
+                score -= 0.12
+                status = "needs_verification"
+                if "job is onsite while query requested remote" not in risks:
+                    risks.append("job is onsite while query requested remote")
 
         # Unknown metadata should not outrank candidates that actually satisfy a
         # stated numeric constraint. Keep them visible, but demote for verification.
@@ -338,6 +439,16 @@ def rank_jobs(
         if preferences.max_required_experience_years is not None and job.min_experience_years is None:
             score -= 0.08
             status = "needs_verification"
+        if entry_level_target and SENIORITY_TITLE_RE.search(job.title):
+            score -= 0.18
+            status = "needs_verification"
+        if min_floor is not None:
+            if job.min_experience_years is None:
+                score -= 0.08
+                status = "needs_verification"
+            elif job.min_experience_years < min_floor:
+                score -= 0.15
+                status = "needs_verification"
 
         match = Match(
             job=job,
@@ -352,6 +463,7 @@ def rank_jobs(
     matches.sort(
         key=lambda match: (
             match.status == "needs_verification",
+            (entry_level_target and bool(SENIORITY_TITLE_RE.search(match.job.title))),
             (preferences.max_required_experience_years is not None
              and match.job.min_experience_years is None),
             -match.score,

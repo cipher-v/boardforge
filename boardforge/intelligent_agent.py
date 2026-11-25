@@ -338,11 +338,19 @@ class ToolCallingAgent:
 
     async def run(
         self, profile_id: str, text: str,
-        *, event_sink: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None,
+        *, top_k: int = 10,
+        event_sink: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None,
     ) -> dict:
+        bounded_top_k = max(1, min(int(top_k), 50))
         if not self.enabled:
-            result = await self.core.handle(profile_id, text)
-            return {"mode": "deterministic", "message": result.message, **result.data}
+            result = await self.core.handle(profile_id, text, top_k=bounded_top_k)
+            payload = dict(result.data)
+            if isinstance(payload.get("trace"), list):
+                payload["trace"] = [
+                    {"ok": True, **step} if isinstance(step, dict) and "ok" not in step else step
+                    for step in payload["trace"]
+                ]
+            return {"mode": "deterministic", "message": result.message, **payload}
 
         state = AgentExecutionState(profile_id=profile_id, user_text=text)
         events: list[dict[str, Any]] = []

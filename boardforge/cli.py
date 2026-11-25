@@ -112,6 +112,13 @@ def main() -> None:
     p_sync_sources.add_argument("--limit", type=int, default=25)
     p_sync_sources.add_argument("--concurrency", type=int, default=4)
 
+    p_reenrich = sub.add_parser("reenrich-index")
+    p_reenrich.add_argument(
+        "--apply",
+        action="store_true",
+        help="Persist recomputed metadata in place; defaults to read-only dry-run.",
+    )
+
     p_snapshot = sub.add_parser("snapshot-eval-corpus")
     p_snapshot.add_argument("--country", default="India")
     p_snapshot.add_argument("--out", default="results/real-corpus.json")
@@ -330,6 +337,17 @@ def main() -> None:
             limit=args.limit, concurrency=args.concurrency,
         ))
         _print_json(out)
+        return
+
+    if args.cmd == "reenrich-index":
+        from boardforge.enrich import reenrich_store_jobs
+
+        store = create_store()
+        try:
+            _print_json(reenrich_store_jobs(store, apply=args.apply))
+        finally:
+            if hasattr(store, "close"):
+                store.close()
         return
 
     if args.cmd == "snapshot-eval-corpus":

@@ -43,7 +43,8 @@ async def request_observability(request: Request, call_next):
         response.headers["x-request-id"] = request_id
         return response
     finally:
-        route = getattr(request.scope.get("route"), "path", request.url.path)
+        route_obj = request.scope.get("route")
+        route = getattr(route_obj, "path", None) or "__unmatched__"
         elapsed = time.perf_counter() - started
         HTTP_REQUESTS.labels(request.method, route, str(status)).inc()
         HTTP_LATENCY.labels(request.method, route).observe(elapsed)

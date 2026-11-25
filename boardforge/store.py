@@ -604,6 +604,11 @@ class Store:
             ).fetchone()
         return Preferences.model_validate_json(row["preferences"]) if row else Preferences()
 
+    def reset_preferences(self, profile_id: str) -> None:
+        """Clear saved preferences for a profile without deleting its resume or feedback."""
+        with self.connect() as connection:
+            connection.execute("DELETE FROM profiles WHERE profile_id=?", (profile_id,))
+
     def save_candidate_profile(self, profile_id: str, profile: CandidateProfile) -> None:
         with self.connect() as connection:
             connection.execute(
