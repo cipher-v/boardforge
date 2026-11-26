@@ -328,10 +328,17 @@ class AgentToolExecutor:
                 return {"ok": False, "error": "search_index_required_before_discovery"}
             if state.sufficient_results:
                 return {"ok": False, "error": "discovery_unnecessary_sufficient_results"}
+            from boardforge.preferences import effective_search_preferences, preserve_search_constraints
+
             profile = self.store.load_candidate_profile(state.profile_id) or CandidateProfile()
-            preferences = self.store.load_preferences(state.profile_id)
+            saved_preferences = self.store.load_preferences(state.profile_id)
+            effective_preferences = preserve_search_constraints(
+                saved_preferences,
+                state.user_text,
+                effective_search_preferences(saved_preferences, arguments.query),
+            )
             queued = await queue_and_dispatch_discovery(
-                self.store, state.profile_id, profile, preferences,
+                self.store, state.profile_id, profile, effective_preferences,
                 query=arguments.query, client=self.discovery_client,
             )
             state.discovery = queued
@@ -365,7 +372,10 @@ class AgentToolExecutor:
         return {
             "mode": retrieval.get("mode"),
             "candidate_count": retrieval.get("candidate_count"),
-            "query_embedding_used": retrieval.get("query_embedding_used"),
+            "semantic_retrieval": retrieval.get("semantic_retrieval"),
+            "query_embedding_cache_hit": retrieval.get("query_embedding_cache_hit"),
+            "query_embedding_source": retrieval.get("query_embedding_source"),
+            "cost_usd": retrieval.get("cost_usd", {}),
             "latency_ms": retrieval.get("latency_ms", {}),
             "verification": {
                 key: verification.get(key)

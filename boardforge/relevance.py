@@ -13,7 +13,8 @@ from typing import Any, Literal, Protocol
 import httpx
 from pydantic import AliasChoices, BaseModel, Field, ValidationError
 
-from boardforge.enrich import salary_min_lpa
+from boardforge.confidence import GENERIC_QUERY_TERMS, occupational_query_text
+from boardforge.enrich import extract_fresher_eligibility_evidence, salary_min_lpa
 from boardforge.llm import (
     LLMCallResult,
     LLMProviderError,
@@ -23,10 +24,11 @@ from boardforge.llm import (
 )
 from boardforge.matching import hard_violations
 from boardforge.models import Job, Match, MatchEvidence, Preferences
+from boardforge.preferences import strip_orchestration_instructions
 
 
 PROMPT_VERSION = "relevance-verifier-v4-evidence-normalization"
-CACHE_FORMAT_VERSION = 3
+CACHE_FORMAT_VERSION = 4
 RelevanceLabel = Literal["direct", "adjacent", "irrelevant", "uncertain"]
 
 SYSTEM_PROMPT = (
@@ -327,7 +329,8 @@ def create_relevance_provider() -> RelevanceProvider:
 
 
 def normalize_intent(intent: str) -> str:
-    return " ".join(intent.casefold().split())
+    cleaned = strip_orchestration_instructions(intent).rstrip(".!?;, ")
+    return " ".join(cleaned.casefold().split())
 
 
 def relevant_preferences(preferences: Preferences) -> dict[str, Any]:
@@ -376,15 +379,31 @@ _EVIDENCE_STOPWORDS = {
     "it", "of", "on", "or", "our", "role", "software", "the", "this", "to",
     "we", "will", "with", "work", "engineer", "engineering", "developer",
 }
+_INTENT_FRAMING_STOPWORDS = {
+    "job", "jobs", "roles", "position", "positions", "opportunity", "opportunities",
+    "opening", "openings", "candidate", "candidates", "india", "bangalore", "bengaluru",
+    "pune", "hyderabad", "gurugram", "gurgaon", "noida", "mumbai", "chennai", "delhi",
+    "remote", "onsite", "hybrid", "entry", "level", "junior", "fresher", "freshers",
+    "years", "year", "yrs", "experience", "find", "show", "search",
+}
+_BROAD_SWE_EVIDENCE_TOKENS = {
+    "api", "apis", "rest", "graphql", "backend", "frontend", "fullstack", "platform",
+    "service", "services", "microservice", "microservices", "system", "systems",
+    "pipeline", "pipelines", "code", "codebase", "feature", "features", "production",
+    "application", "applications", "database", "databases", "sql", "postgresql",
+    "mysql", "python", "java", "golang", "node", "typescript", "distributed",
+    "architecture", "integration", "integrations", "deploy", "deployment",
+}
 _INJECTION_PATTERN = re.compile(
     r"\b(?:ignore (?:all |the )?(?:previous|prior) instructions?|system prompt|"
     r"return (?:this )?(?:candidate )?(?:as )?(?:direct|adjacent|irrelevant)|"
     r"follow these instructions?)\b", re.I,
 )
 _RESPONSIBILITY_PATTERN = re.compile(
-    r"\b(?:you will|you'll|responsib(?:le|ilities)|own|build|develop|design|"
+    r"\b(?:you will|you(?:'|’)ll|responsib(?:le|ilities)|own|build|develop|design|"
     r"implement|maintain|operate|deploy|lead|manage|support|negotiate|create|"
-    r"deliver|architect|investigate|analyze|optim(?:ize|ise))\b",
+    r"deliver|architect|investigate|analyze|optim(?:ize|ise)|write|ship|debug|"
+    r"integrate|scale|train|evaluate|automate)\b",
     re.I,
 )
 _OPTIONAL_QUALIFICATION_PATTERN = re.compile(
@@ -447,8 +466,36 @@ def _evidence_is_supportive(
     # Provider reasoning is an untrusted explanation, not source evidence. In
     # particular, verbose reasoning must not manufacture lexical support for an
     # otherwise unrelated evidence segment.
-    target = _meaningful_tokens(f"{intent} {job.title}")
-    return bool(target & _meaningful_tokens(" ".join(substantive)))
+    cleaned_intent = occupational_query_text(intent) if intent.strip() else ""
+    specific_intent_tokens = (
+        _meaningful_tokens(cleaned_intent) - GENERIC_QUERY_TERMS - _INTENT_FRAMING_STOPWORDS
+    )
+    title_tokens = _meaningful_tokens(job.title) - GENERIC_QUERY_TERMS - _INTENT_FRAMING_STOPWORDS
+    substantive_tokens = _meaningful_tokens(" ".join(substantive))
+    if specific_intent_tokens:
+        target = specific_intent_tokens | title_tokens
+        if bool(target & substantive_tokens):
+            return True
+        # When the query explicitly asks for backend/software engineering, concrete
+        # software/backend responsibility tokens also substantiate direct SWE/Backend work.
+        if specific_intent_tokens <= {"backend", "server", "side", "sde", "swe"} and (
+            substantive_tokens & _BROAD_SWE_EVIDENCE_TOKENS
+        ):
+            return True
+        return False
+
+    # Broad software-engineering or resume-led query where generic role words
+    # ('software', 'engineer', 'developer') were intentionally excluded from _meaningful_tokens.
+    target = title_tokens | (
+        _BROAD_SWE_EVIDENCE_TOKENS
+        if re.search(
+            r"\b(?:software|engineer|engineering|developer|sde|swe|backend|full[- ]?stack)\b",
+            f"{cleaned_intent} {job.title}",
+            re.I,
+        )
+        else _meaningful_tokens(f"{cleaned_intent} {job.title}")
+    )
+    return bool(target & substantive_tokens)
 
 
 def _resolved_reasoning(judgment: ProviderJudgment) -> str:
@@ -481,7 +528,17 @@ def _eligibility_restrictions(
         preferences.max_required_experience_years is not None
         and match.job.min_experience_years is None
     ):
-        restrictions.append("experience_eligibility_unknown")
+        has_explicit_fresher = any(
+            item.kind == "experience" and item.value == "entry-level eligible"
+            for item in match.evidence
+        )
+        if not has_explicit_fresher:
+            fresher_ev = extract_fresher_eligibility_evidence(
+                match.job.title, match.job.description
+            )
+            has_explicit_fresher = bool(fresher_ev and fresher_ev[0] == "explicit")
+        if not has_explicit_fresher:
+            restrictions.append("experience_eligibility_unknown")
     if _confirmed_no_vacancy(match.job):
         restrictions.append("confirmed_no_current_vacancy")
     return list(dict.fromkeys(restrictions))
@@ -752,7 +809,12 @@ class RelevanceVerifier:
                 restricted_ids.add(match.job.stable_id)
                 for reason in restrictions:
                     protected_by_reason[reason] = protected_by_reason.get(reason, 0) + 1
-                match.status = "needs_verification"
+                only_unknown_eligibility = set(restrictions) <= {
+                    "experience_eligibility_unknown",
+                    "salary_eligibility_unknown",
+                }
+                if not (match.status == "alternative" and only_unknown_eligibility):
+                    match.status = "needs_verification"
                 detail = "deterministic restriction cannot be overridden: " + ", ".join(restrictions)
                 if detail not in match.risks:
                     match.risks.append(detail)
@@ -760,7 +822,7 @@ class RelevanceVerifier:
 
         shortlist = [
             match for match in matches
-            if match.status in {"recommended", "needs_verification"}
+            if match.status in {"recommended", "alternative", "needs_verification"}
             and match.job.stable_id not in restricted_ids
         ][: self.max_candidates]
         shortlisted_ids = {match.job.stable_id for match in shortlist}
@@ -781,6 +843,13 @@ class RelevanceVerifier:
                 "estimated_cost_usd": 0.0,
                 "deterministically_protected": protected,
                 "protected_by_reason": protected_by_reason,
+                "latency_ms": {
+                    "eligibility": round(eligibility_ms, 2),
+                    "cache_lookup": 0.0,
+                    "model_wall": 0.0,
+                    "validation": 0.0,
+                    "total": round((time.perf_counter() - total_started) * 1000, 2),
+                },
             }
 
         cache_started = time.perf_counter()
@@ -1102,7 +1171,11 @@ class RelevanceVerifier:
             judgment = judgments.get(match.job.stable_id) or self._fallback(
                 match.job.stable_id, "no verifier judgment available"
             )
-            if judgment.relevance == "direct":
+            has_only_adjacent_role = (
+                any(item.kind == "adjacent_role" for item in match.evidence)
+                and not any(item.kind == "role" for item in match.evidence)
+            )
+            if judgment.relevance == "direct" and not has_only_adjacent_role:
                 verified += 1
                 if original_statuses[match.job.stable_id] == "needs_verification":
                     upgraded += 1
@@ -1117,7 +1190,7 @@ class RelevanceVerifier:
                         detail=snippet,
                         weight=0.0,
                     ))
-            elif judgment.relevance == "adjacent":
+            elif judgment.relevance in {"adjacent", "direct"}:
                 alternatives += 1
                 match.status = "alternative"
                 match.reasons.append(

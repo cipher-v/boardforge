@@ -87,17 +87,18 @@ _NUMBER_WORDS = {"zero": 0, "one": 1, "two": 2, "three": 3, "four": 4,
                  "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
 _NUMBER = r"(?:\d+(?:\.\d+)?|" + "|".join(_NUMBER_WORDS) + r")"
 DIRECT_EXPERIENCE_CAP_RE = re.compile(
-    r"\b(?:up to|at most|maximum(?: of)?|max(?:imum)?(?: required)?(?: experience)?\s*:?|"
-    r"no more than|not more than|no greater than|not over|under|at or below)"
-    r"\s*(" + _NUMBER + r")\s*(?:years?|yrs?)\b(?:\s+of experience)?", re.I
+    r"(?:\b(?:up to|at most|maximum(?: of)?|max(?:imum)?(?: required)?(?: experience)?\s*:?|"
+    r"no more than|not more than|no greater than|not over|under|less than|at or below)|"
+    r"(?<!\w)(?:<=|≤|<))"
+    r"\s*(" + _NUMBER + r")\s*(?:years?|yrs?|yoe)\b(?:\s+(?:of\s+)?experience)?", re.I
 )
 EXCEEDING_EXPERIENCE_RE = re.compile(
-    r"\b(?:more than|over|above|greater than)"
-    r"\s*(" + _NUMBER + r")\s*(?:years?|yrs?)\b(?:\s+of experience)?", re.I
+    r"(?:\b(?:more than|over|above|greater than)|(?<!\w)(?:>=|≥|>))"
+    r"\s*(" + _NUMBER + r")\s*(?:years?|yrs?|yoe)\b(?:\s+(?:of\s+)?experience)?", re.I
 )
 EXPERIENCE_FLOOR_RE = re.compile(
-    r"(?:\b(?:at least|minimum(?: of)?|min\.?)\s*(" + _NUMBER + r")\s*\+?\s*(?:years?|yrs?)\b(?:\s+of experience)?|"
-    r"\b(" + _NUMBER + r")\+\s*(?:years?|yrs?)\b(?:\s+of experience)?)",
+    r"(?:\b(?:at least|minimum(?: of)?|min\.?)\s*(" + _NUMBER + r")\s*\+?\s*(?:years?|yrs?|yoe)\b(?:\s+(?:of\s+)?experience)?|"
+    r"\b(" + _NUMBER + r")\+\s*(?:years?|yrs?|yoe)\b(?:\s+(?:of\s+)?experience)?)",
     re.I,
 )
 # Combined pattern for stripping experience framing from occupational text.
@@ -107,6 +108,42 @@ EXPERIENCE_CAP_RE = re.compile(
     + EXPERIENCE_FLOOR_RE.pattern + r")",
     re.I,
 )
+_ORCHESTRATION_CLAUSE_RE = re.compile(
+    r"(?:^|[.;!?]+\s*|,\s+|\s+(?:and|or)\s+|—\s*|\s+-\s+)"
+    r"(?:"
+    r"(?:if|when|whenever)\s+[^.;!?]*?\b(?:"
+    r"insufficient|scarce|limited|not\s+enough|too\s+few|"
+    r"(?:fewer|less)\s+than\s+(?:\d+|zero|one|two|three|four|five|six|seven|eight|nine|ten)\b|"
+    r"no\s+(?:suitable\s+|matching\s+|indexed\s+|verified\s+|good\s+|relevant\s+)?(?:matches|results|opportunities|jobs|roles|openings|recommendations)|"
+    r"needed"
+    r")\b[^.;!?]*"
+    r"|"
+    r"(?:if|when|whenever|unless|otherwise)\s+[^.;!?]*?\b(?:"
+    r"discover(?:ing)?\s+(?:more|new|additional|external)|"
+    r"sync(?:hroniz(?:e|ing))?\s+(?:more|new|additional|trusted)?\s*(?:job\s+)?(?:sources?|boards?)"
+    r")\b[^.;!?]*"
+    r"|"
+    r"(?:please\s+)?discover\s+(?:more|new|additional|external)\s+(?:job\s+)?(?:sources?|boards?|opportunities)[^.;!?]*"
+    r"|"
+    r"while\s+(?:preserving|keeping|maintaining|respecting)\s+(?:my\s+)?[^.;!?]*?\bconstraints?\b[^.;!?]*"
+    r")",
+    re.I,
+)
+
+
+def strip_orchestration_instructions(text: str) -> str:
+    """Strip conditional workflow/discovery meta-instructions while preserving primary search intent."""
+    if not text.strip():
+        return ""
+    cleaned = text
+    for _ in range(3):
+        updated = _ORCHESTRATION_CLAUSE_RE.sub(" ", cleaned)
+        if updated == cleaned:
+            break
+        cleaned = updated
+    cleaned = re.sub(r"\s+([.,;!?])", r"\1", " ".join(cleaned.split()))
+    cleaned = re.sub(r"([.,;!?]){2,}", r"\1", cleaned)
+    return cleaned.strip(" ,;")
 NO_EXPERIENCE_RE = re.compile(
     r"\b(?:no|zero|without)\s+(?:prior\s+|formal\s+)?(?:employment\s+|work\s+|professional\s+|industry\s+)?experience\b",
     re.I,
@@ -332,9 +369,10 @@ def deterministic_extract(text: str, current: Preferences | None = None) -> Pref
 
 def effective_search_preferences(current: Preferences, text: str) -> Preferences:
     """Overlay explicit one-off query constraints without persisting them."""
-    transient = deterministic_extract(text, Preferences())
+    primary_text = strip_orchestration_instructions(text) or text
+    transient = deterministic_extract(primary_text, Preferences())
     effective = current.model_copy(deep=True)
-    low = text.casefold()
+    low = primary_text.casefold()
 
     if transient.roles:
         effective.roles = transient.roles

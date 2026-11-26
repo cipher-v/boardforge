@@ -13,9 +13,17 @@ from boardforge.confidence import (
     parse_query_intent,
     query_evidence_items,
 )
-from boardforge.enrich import infer_country, salary_min_lpa
+from boardforge.enrich import (
+    extract_fresher_eligibility_evidence,
+    infer_country,
+    salary_min_lpa,
+)
 from boardforge.models import Job, Match, MatchEvidence, Preferences
-from boardforge.preferences import extract_experience_floor, is_entry_level_target
+from boardforge.preferences import (
+    extract_experience_floor,
+    is_entry_level_target,
+    strip_orchestration_instructions,
+)
 
 
 WORD_RE = re.compile(r"[a-zA-Z0-9+#.]{2,}")
@@ -60,6 +68,41 @@ _FRONTEND_FOCUSED_TITLE_RE = re.compile(
     r"\b(?:front[- ]?end|ui|ux|mobile|ios|android)(?:[- ]+(?:focused|first|only|specialist))?\b",
     re.I,
 )
+_SOLUTIONS_CUSTOMER_TITLE_RE = re.compile(
+    r"\b(?:ai\s+|ml\s+|technical\s+)?(?:solutions?|forward[- ]deployed|implementation|"
+    r"deployment|customer|partner|field|pre[- ]?sales|sales)\s+"
+    r"(?:ai\s+|ml\s+)?(?:engineer|developer|architect|specialist)\b",
+    re.I,
+)
+_DEVOPS_INFRA_TITLE_RE = re.compile(
+    r"\b(?:devops|sre|site\s+reliability|cloud\s+infrastructure|release\s+engineer|build\s+engineer)\b",
+    re.I,
+)
+_SECURITY_TITLE_RE = re.compile(
+    r"\b(?:security|cybersecurity|appsec|infosec|soc|pentest)\s+(?:ai\s+)?(?:engineer|analyst|specialist)\b",
+    re.I,
+)
+_CRM_SUPPORT_TITLE_RE = re.compile(
+    r"\b(?:salesforce|agentforce|servicenow|workday|netsuite|amazon\s+connect|"
+    r"contact\s+center|technical\s+support|customer\s+support|it\s+support|help\s*desk|"
+    r"support\s+engineer)\b",
+    re.I,
+)
+_NON_VACANCY_TITLE_RE = re.compile(
+    r"\b(?:submit\s+(?:a|that)\s+referral|talent\s+(?:pool|community)|"
+    r"general\s+application|not\s+currently\s+posted)\b",
+    re.I,
+)
+_MLOPS_INFRA_RESPONSIBILITY_RE = re.compile(
+    r"\b(?:mlops|model\s+(?:serving|deployment|training|inference)|"
+    r"inference\s+(?:pipeline|pipelines|server|engine)|kubeflow|sagemaker|triton|vllm)\b",
+    re.I,
+)
+_ADJACENT_AI_SOLUTIONS_DESC_RE = re.compile(
+    r"\b(?:system\s+prompts?|prompt\s+engineering|voice\s+agents?|llm|rag|"
+    r"agent\s+flows?|conversational\s+ai|generative\s+ai)\b",
+    re.I,
+)
 
 
 def tokens(text: str) -> list[str]:
@@ -71,7 +114,8 @@ def job_text(job: Job) -> str:
 
 
 def query_text(preferences: Preferences, query: str = "") -> str:
-    return " ".join(preferences.roles + preferences.locations + preferences.prefer_terms + [query])
+    cleaned_query = strip_orchestration_instructions(query) if query else ""
+    return " ".join(preferences.roles + preferences.locations + preferences.prefer_terms + [cleaned_query])
 
 
 def _cosine_overlap(query: str, document: str) -> float:
@@ -189,12 +233,53 @@ def query_topic_evidence(
     )
 
 
-def role_evidence(job: Job, role: str) -> MatchEvidence | None:
+def role_evidence(job: Job, role: str, *, query: str = "") -> MatchEvidence | None:
     title = " ".join(job.title.lower().split())
-    if LEADERSHIP_TITLE_RE.search(title):
+    low_q = query.casefold()
+    if LEADERSHIP_TITLE_RE.search(title) or _NON_VACANCY_TITLE_RE.search(title):
         return None
     if role == "AI/ML" and re.search(r"\b(?:hardware|embedded|firmware)\b", title, re.I):
         return None
+
+    # Do not let CRM/Salesforce/support/security titles with incidental "AI" qualify as direct core engineering.
+    if role in {"AI/ML", "Computer Vision", "Backend", "Software Engineering", "Data Engineering"}:
+        if _CRM_SUPPORT_TITLE_RE.search(title) and not _CRM_SUPPORT_TITLE_RE.search(low_q):
+            return None
+    if role in {"AI/ML", "Computer Vision"}:
+        if _SECURITY_TITLE_RE.search(title) and "security" not in low_q:
+            return None
+        if _DEVOPS_INFRA_TITLE_RE.search(title) and not _DEVOPS_INFRA_TITLE_RE.search(low_q):
+            if role == "AI/ML" and _MLOPS_INFRA_RESPONSIBILITY_RE.search(job.description):
+                return MatchEvidence(
+                    kind="adjacent_role",
+                    value=role,
+                    detail=f"adjacent MLOps/AI infrastructure role ('{job.title}')",
+                    weight=0.09,
+                )
+            return None
+
+    if _SOLUTIONS_CUSTOMER_TITLE_RE.search(title) and not _SOLUTIONS_CUSTOMER_TITLE_RE.search(low_q):
+        if role == "AI/ML" and (
+            re.search(r"\b(?:ai|ml|llm|voice)\b", title, re.I)
+            or _ADJACENT_AI_SOLUTIONS_DESC_RE.search(job.description)
+        ):
+            return MatchEvidence(
+                kind="adjacent_role",
+                value=role,
+                detail=f"adjacent solutions/customer-facing AI role ('{job.title}')",
+                weight=0.09,
+            )
+        if role in {"Software Engineering", "Backend"} and re.search(
+            r"\b(?:api|apis|backend|python|integrations?|sdk)\b", job.description, re.I
+        ):
+            return MatchEvidence(
+                kind="adjacent_role",
+                value=role,
+                detail=f"adjacent solutions/integration engineering role ('{job.title}')",
+                weight=0.08,
+            )
+        return None
+
     if role == "Backend":
         if _QA_TITLE_RE.search(title):
             return None
@@ -283,13 +368,15 @@ def hard_violations(job: Job, preferences: Preferences, query: str = "") -> list
     return violations
 
 
-def evidence(job: Job, preferences: Preferences) -> tuple[list[str], list[str], float, list[MatchEvidence]]:
+def evidence(
+    job: Job, preferences: Preferences, *, query: str = ""
+) -> tuple[list[str], list[str], float, list[MatchEvidence]]:
     text = job_text(job).lower()
     items: list[MatchEvidence] = []
     risks: list[str] = []
 
     for role in preferences.roles:
-        item = role_evidence(job, role)
+        item = role_evidence(job, role, query=query)
         if item:
             items.append(item)
 
@@ -329,7 +416,26 @@ def evidence(job: Job, preferences: Preferences) -> tuple[list[str], list[str], 
 
     if preferences.max_required_experience_years is not None:
         if job.min_experience_years is None:
-            risks.append("experience requirement not verified")
+            fresher_ev = extract_fresher_eligibility_evidence(job.title, job.description)
+            if fresher_ev and fresher_ev[0] == "explicit":
+                items.append(MatchEvidence(
+                    kind="experience",
+                    value="entry-level eligible",
+                    detail=f"explicit fresher/entry-level eligibility ('{fresher_ev[1]}')",
+                    weight=0.04,
+                ))
+            elif fresher_ev and fresher_ev[0] == "early_career_signal":
+                items.append(MatchEvidence(
+                    kind="experience_signal",
+                    value="early-career signal",
+                    detail=f"early-career/fresher cue in description ('{fresher_ev[1]}')",
+                    weight=0.02,
+                ))
+                risks.append(
+                    "numeric experience requirement not stated (early-career/fresher cues present)"
+                )
+            else:
+                risks.append("experience requirement not verified")
         elif job.min_experience_years <= preferences.max_required_experience_years:
             items.append(MatchEvidence(
                 kind="experience", value=f"{job.min_experience_years:g} years",
@@ -353,7 +459,7 @@ def _has_query_overlap(
     if not query.strip():
         return True
     if preferences.roles:
-        return any(item.kind == "role" for item in structured_evidence)
+        return any(item.kind in {"role", "adjacent_role"} for item in structured_evidence)
     if assessment is not None:
         if assessment.matched_terms:
             return True
@@ -403,7 +509,7 @@ def rank_jobs(
         violations = hard_violations(job, preferences, query=query)
         if violations:
             continue
-        reasons, risks, bonus, structured_evidence = evidence(job, preferences)
+        reasons, risks, bonus, structured_evidence = evidence(job, preferences, query=query)
         assessment = None
         if query.strip():
             assessment = assess_query_relevance(job, preferences, query)
@@ -411,9 +517,9 @@ def rank_jobs(
             structured_evidence.extend(intent_items)
             reasons.extend(item.detail for item in intent_items)
             bonus += sum(item.weight for item in intent_items)
-        if preferences.roles and not any(
-            item.kind == "role" for item in structured_evidence
-        ):
+        has_direct_role = any(item.kind == "role" for item in structured_evidence)
+        has_adjacent_role = any(item.kind == "adjacent_role" for item in structured_evidence)
+        if preferences.roles and not has_direct_role and not has_adjacent_role:
             continue
         if not allow_semantic_candidates and not _has_query_overlap(
             job, preferences, query, structured_evidence, assessment
@@ -422,6 +528,27 @@ def rank_jobs(
 
         score = lexical_score(job, preferences, query) + bonus
         status = "recommended"
+        if has_adjacent_role and not has_direct_role:
+            status = "alternative"
+            adj_risk = (
+                "adjacent occupational match rather than direct "
+                + ", ".join(preferences.roles)
+                + " engineering"
+            )
+            if adj_risk not in risks:
+                risks.append(adj_risk)
+
+        # On SWE/Backend searches, flag DevOps-titled roles whose focus is cloud/SRE infrastructure.
+        if (
+            has_direct_role
+            and _DEVOPS_INFRA_TITLE_RE.search(job.title)
+            and query.strip()
+            and not _DEVOPS_INFRA_TITLE_RE.search(query)
+        ):
+            status = "needs_verification"
+            devops_risk = "title indicates DevOps/infrastructure focus; verify fit with target role"
+            if devops_risk not in risks:
+                risks.append(devops_risk)
 
         if explicit_remote_requested:
             if job.remote_policy == "remote":
@@ -432,14 +559,28 @@ def rank_jobs(
                 if "job is onsite while query requested remote" not in risks:
                     risks.append("job is onsite while query requested remote")
 
+        has_explicit_fresher = any(
+            item.kind == "experience" and item.value == "entry-level eligible"
+            for item in structured_evidence
+        )
+        has_early_career_signal = any(
+            item.kind == "experience_signal" for item in structured_evidence
+        )
+
         # Unknown metadata should not outrank candidates that actually satisfy a
         # stated numeric constraint. Keep them visible, but demote for verification.
         if preferences.min_salary_lpa is not None and salary_min_lpa(job) is None:
             score -= 0.12
-            status = "needs_verification"
-        if preferences.max_required_experience_years is not None and job.min_experience_years is None:
-            score -= 0.08
-            status = "needs_verification"
+            if status != "alternative":
+                status = "needs_verification"
+        if (
+            preferences.max_required_experience_years is not None
+            and job.min_experience_years is None
+            and not has_explicit_fresher
+        ):
+            score -= 0.04 if has_early_career_signal else 0.08
+            if status != "alternative":
+                status = "needs_verification"
         if entry_level_target and SENIORITY_TITLE_RE.search(job.title):
             score -= 0.18
             status = "needs_verification"
@@ -461,12 +602,19 @@ def rank_jobs(
             evidence=structured_evidence,
         )
         matches.append(enforce_recommendation_confidence(match, preferences, query))
+    status_order = {"recommended": 0, "alternative": 1, "needs_verification": 2}
     matches.sort(
         key=lambda match: (
-            match.status == "needs_verification",
+            status_order.get(match.status, 2),
             (entry_level_target and bool(SENIORITY_TITLE_RE.search(match.job.title))),
-            (preferences.max_required_experience_years is not None
-             and match.job.min_experience_years is None),
+            (
+                preferences.max_required_experience_years is not None
+                and match.job.min_experience_years is None
+                and not any(
+                    item.kind == "experience" and item.value == "entry-level eligible"
+                    for item in match.evidence
+                )
+            ),
             -match.score,
             match.job.title.casefold(),
         )

@@ -172,6 +172,25 @@ class ToolCallingAgent:
             float(getattr(self.provider, "output_usd_per_million", 0.0)),
         )
 
+    @staticmethod
+    def _cost_breakdown(
+        tool_results: list[dict[str, Any]], agent_reasoning_cost: float
+    ) -> dict[str, float]:
+        emb = 0.0
+        ver = 0.0
+        for item in tool_results:
+            res = item.get("result") or {}
+            cost = (res.get("retrieval") or {}).get("cost_usd") or {}
+            emb += float(cost.get("query_embedding", 0.0) or 0.0)
+            ver += float(cost.get("relevance_verification", 0.0) or 0.0)
+        reason_val = float(agent_reasoning_cost or 0.0)
+        return {
+            "agent_reasoning": round(reason_val, 8),
+            "query_embedding": round(emb, 8),
+            "relevance_verification": round(ver, 8),
+            "total_incremental_usd": round(reason_val + emb + ver, 8),
+        }
+
     def _estimate_reservation(self, payload: dict[str, Any]) -> tuple[int, float]:
         estimated_input = max(256, (
             len(json.dumps(payload, default=str)) + len(AGENT_SYSTEM_PROMPT)
@@ -474,6 +493,7 @@ class ToolCallingAgent:
                     ),
                     "provider_failure": None, "token_usage": usage.model_dump(),
                     "estimated_cost_usd": 0.0, "total_latency_ms": total_ms,
+                    "cost_breakdown_usd": self._cost_breakdown(tool_results, 0.0),
                     "latency_ms": {
                         "context_preload": context_latency_ms,
                         "provider_inference_sum": 0.0,
@@ -737,6 +757,7 @@ class ToolCallingAgent:
                 ),
                 "provider_failure": failure, "token_usage": usage.model_dump(),
                 "estimated_cost_usd": round(estimated_cost, 8),
+                "cost_breakdown_usd": self._cost_breakdown(tool_results, estimated_cost),
                 "total_latency_ms": round((time.perf_counter() - started) * 1000, 2),
                 "latency_ms": {
                     "context_preload": context_latency_ms,

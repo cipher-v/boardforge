@@ -16,4 +16,10 @@ async def sync_url(url: str, store: StoreProtocol) -> SyncSummary:
     connector = CONNECTORS[source.kind]
     raw_jobs = await connector.fetch(source)
     jobs = [enrich_job(job) for job in raw_jobs]
-    return store.upsert_source_jobs(source.kind, source.key, jobs)
+    is_official_ats = source.kind in {"greenhouse", "lever", "ashby"}
+    return store.upsert_source_jobs(
+        source.kind,
+        source.key,
+        jobs,
+        allow_verified_empty=is_official_ats,
+    )

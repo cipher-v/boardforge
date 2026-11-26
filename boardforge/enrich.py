@@ -535,6 +535,72 @@ def extract_job_experience(
     return best_min, best_max
 
 
+_EXPLICIT_FRESHER_TITLE_RE = re.compile(
+    r"\b(?:new\s+grad(?:uate)?s?|recent\s+graduates?|graduate\s+engineer(?:\s+trainee)?|"
+    r"campus\s+hire|fresher|entry[- ]level)\b",
+    re.I,
+)
+_EXPLICIT_FRESHER_DESC_RE = re.compile(
+    r"\b(?:"
+    r"(?:no|zero)\s+(?:prior\s+|previous\s+|formal\s+|professional\s+|work\s+|industry\s+)?experience\s+(?:is\s+)?(?:required|needed|necessary)|"
+    r"freshers?\s+(?:are\s+)?(?:welcome|encouraged(?:\s+to\s+apply)?|eligible|can\s+apply|may\s+apply|invited|accepted)|"
+    r"open\s+to\s+(?:freshers?|recent\s+graduates?|new\s+grads?|entry[- ]level\s+(?:candidates?|engineers?|applicants?))|"
+    r"(?:recent\s+graduates?|new\s+grads?)\s+(?:are\s+)?(?:welcome|encouraged\s+to\s+apply|eligible|can\s+apply|may\s+apply)"
+    r")\b",
+    re.I,
+)
+_EARLY_CAREER_SIGNAL_DESC_RE = re.compile(
+    r"\b(?:"
+    r"freshers?\s+who\s+joined|"
+    r"(?:compensation|role|opportunity|suited|ideal|designed)\s+for\s+(?:early[- ]career|freshers?|recent\s+graduates?)|"
+    r"early[- ]career\s+(?:profiles?|engineers?|candidates?|talent)"
+    r")\b",
+    re.I,
+)
+_FRESHER_NEGATION_PREFIX_RE = re.compile(
+    r"\b(?:not|no|never|neither|cannot|can't|unable\s+to\s+consider|do\s+not\s+apply\s+if)\s+(?:[a-z]+\s+){0,3}$",
+    re.I,
+)
+
+
+def extract_fresher_eligibility_evidence(
+    title: str, description: str
+) -> tuple[str, str] | None:
+    """Identify explicit fresher/graduate/no-experience eligibility without fabricating numeric years.
+
+    Returns ('explicit', matched_text) for direct eligibility statements (e.g. 'Freshers welcome',
+    'No prior experience required', 'New Grad') or ('early_career_signal', matched_text) for
+    contextual early-career cues (e.g. 'Freshers who joined...', 'early-career profiles').
+    Returns None when experience is unstated or contradicts entry-level eligibility.
+    """
+    min_exp, _ = extract_job_experience(title, description)
+    if min_exp is not None and min_exp > 1.0:
+        return None
+
+    t_norm = " ".join((title or "").split())
+    m_title = _EXPLICIT_FRESHER_TITLE_RE.search(t_norm)
+    if m_title and not _FRESHER_NEGATION_PREFIX_RE.search(t_norm[max(0, m_title.start() - 30):m_title.start()]):
+        return ("explicit", m_title.group(0))
+
+    d_norm = " ".join((description or "").split())
+    if not d_norm:
+        return None
+
+    for m in _EXPLICIT_FRESHER_DESC_RE.finditer(d_norm):
+        prefix = d_norm[max(0, m.start() - 35):m.start()]
+        if _FRESHER_NEGATION_PREFIX_RE.search(prefix) or _OPTIONAL_PREFIX_RE.search(prefix):
+            continue
+        return ("explicit", m.group(0))
+
+    for m in _EARLY_CAREER_SIGNAL_DESC_RE.finditer(d_norm):
+        prefix = d_norm[max(0, m.start() - 35):m.start()]
+        if _FRESHER_NEGATION_PREFIX_RE.search(prefix):
+            continue
+        return ("early_career_signal", m.group(0))
+
+    return None
+
+
 def enrich_job(job: Job) -> Job:
     j = job.model_copy(deep=True)
     text = f"{j.location} {j.title} {j.description}".lower()

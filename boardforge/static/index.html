@@ -439,14 +439,17 @@ async function applyDiscoveryState(rec,targetQuery,opts={}){
     stopDiscoveryPolling();
     const rep=rec.report||{};
     const boards=Number(rep.synced_boards||0),fetched=Number(rep.jobs_fetched||0);
+    const failedBoards=Number(rep.failed_boards||0);
     const hasInserted=rep.jobs_inserted!==undefined&&rep.jobs_inserted!==null;
     const hasMatching=rep.new_matching_jobs!==undefined&&rep.new_matching_jobs!==null;
-    let metrics=boards+' board(s) synced, '+fetched+' job(s) fetched';
+    const hasRecommended=rep.new_recommended_jobs!==undefined&&rep.new_recommended_jobs!==null;
+    let metrics=boards+' board(s) synced'+(failedBoards?', '+failedBoards+' failed':'')+', '+fetched+' job(s) fetched';
     if(hasInserted)metrics+=', '+Number(rep.jobs_inserted)+' newly indexed';
     if(hasMatching)metrics+=', '+Number(rep.new_matching_jobs)+' matching surfaced';
+    if(hasRecommended)metrics+=' ('+Number(rep.new_recommended_jobs)+' recommended)';
     btn.disabled=true;
     if(boards===0&&!rec.cached){
-      st.textContent='Discovery completed · 0 new boards synced'+(rep.reason?' ('+rep.reason+').':'.');
+      st.textContent='Discovery completed · 0 new boards synced'+(failedBoards?' ('+failedBoards+' board sync failed)':'')+(rep.reason?' · '+rep.reason+'.':'.');
       return;
     }
     if(rec.cached&&opts.fromDirectSubmit){

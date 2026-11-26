@@ -15,8 +15,12 @@ class AshbyConnector(JobConnector):
         if r.status_code != 200:
             raise ConnectorError(f"Ashby fetch failed: {r.status_code}")
         payload = r.json()
+        if not isinstance(payload, dict) or not isinstance(payload.get("jobs"), list):
+            raise ConnectorError("Ashby malformed response: missing jobs list")
         jobs = []
-        for item in payload.get("jobs", []):
+        for item in payload["jobs"]:
+            if not isinstance(item, dict):
+                raise ConnectorError("Ashby malformed job entry")
             desc = item.get("descriptionPlain", "") or ""
             lowered = f"{item.get('title','')} {desc}".lower()
             remote = "remote" if item.get("isRemote") else "unknown"

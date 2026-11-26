@@ -33,8 +33,12 @@ class GreenhouseConnector(JobConnector):
         if r.status_code != 200:
             raise ConnectorError(f"Greenhouse fetch failed: {r.status_code}")
         payload = r.json()
+        if not isinstance(payload, dict) or not isinstance(payload.get("jobs"), list):
+            raise ConnectorError("Greenhouse malformed response: missing jobs list")
         jobs = []
-        for item in payload.get("jobs", []):
+        for item in payload["jobs"]:
+            if not isinstance(item, dict) or "id" not in item:
+                raise ConnectorError("Greenhouse malformed job entry")
             description = _strip_html(item.get("content", ""))
             title = item.get("title", "")
             text = f"{title} {description}".lower()

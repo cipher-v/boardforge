@@ -5,7 +5,12 @@ import re
 from dataclasses import dataclass
 
 from boardforge.models import Job, Match, MatchEvidence, Preferences
-from boardforge.preferences import EXPERIENCE_CAP_RE, extract_experience_floor, is_entry_level_target
+from boardforge.preferences import (
+    EXPERIENCE_CAP_RE,
+    extract_experience_floor,
+    is_entry_level_target,
+    strip_orchestration_instructions,
+)
 
 
 TOKEN_RE = re.compile(r"[a-zA-Z0-9+#.]{2,}")
@@ -116,8 +121,9 @@ _NEGATED_CLAUSE_RE = re.compile(
 
 
 def occupational_query_text(query: str) -> str:
-    """Remove search framing, negated exclusions, and eligibility phrases, not occupational evidence."""
-    cleaned = EXPERIENCE_CAP_RE.sub(" ", query.casefold())
+    """Remove orchestration clauses, search framing, negated exclusions, and eligibility phrases."""
+    cleaned = strip_orchestration_instructions(query).casefold()
+    cleaned = EXPERIENCE_CAP_RE.sub(" ", cleaned)
     cleaned = _NEGATED_CLAUSE_RE.sub(" ", cleaned)
     for pattern in (
         r"\b(?:entry[- ]level|early[- ]career|freshers?|new grads?|recent graduates?)\b",
@@ -129,7 +135,8 @@ def occupational_query_text(query: str) -> str:
         r"\b(?:find|search(?:\s+for)?|show(?:\s+me)?|include|explore|look\s+for|list)\b",
     ):
         cleaned = re.sub(pattern, " ", cleaned)
-    # Sentence punctuation is not a technical query term.
+    # Sentence punctuation and standalone inequality operators are not technical query terms.
+    cleaned = re.sub(r"(?:<=|>=|≤|≥|<|>)", " ", cleaned)
     cleaned = re.sub(r"[.,;:!?](?=\s|$)", " ", cleaned)
     return " ".join(cleaned.split())
 
@@ -278,17 +285,21 @@ def enforce_recommendation_confidence(
 
     assessment = assess_query_relevance(match.job, preferences, query)
     role_items = [item for item in match.evidence if item.kind == "role"]
+    adjacent_items = [item for item in match.evidence if item.kind == "adjacent_role"]
     title_role = any(item.detail.startswith("title matched") for item in role_items)
     description_role = bool(role_items) and not title_role
     uncertain_reasons: list[str] = []
+    severe_conflict = False
 
     job_leadership = bool(LEADERSHIP_TITLE_RE.search(match.job.title))
     if assessment.intent.leadership and not job_leadership:
         uncertain_reasons.append("leadership intent does not match an individual-contributor title")
+        severe_conflict = True
     if assessment.intent.individual_contributor and job_leadership:
         uncertain_reasons.append("individual-contributor intent does not match a leadership title")
+        severe_conflict = True
 
-    if preferences.roles and not role_items:
+    if preferences.roles and not role_items and not adjacent_items:
         uncertain_reasons.append("requested role was not verified")
     elif preferences.roles and not assessment.intent.specific_terms and description_role:
         # For a broad role-only search, a generic title cannot become a verified
@@ -309,6 +320,7 @@ def enforce_recommendation_confidence(
     entry_level_target = is_entry_level_target(preferences, query)
     if entry_level_target and SENIORITY_TITLE_RE.search(match.job.title):
         uncertain_reasons.append("seniority title conflicts with entry-level target")
+        severe_conflict = True
 
     min_floor = extract_experience_floor(query)
     if min_floor is not None:
@@ -316,13 +328,19 @@ def enforce_recommendation_confidence(
             uncertain_reasons.append(
                 f"minimum experience target ({min_floor:g}+ years) not verified in job metadata"
             )
+            severe_conflict = True
         elif match.job.min_experience_years < min_floor:
             uncertain_reasons.append(
                 f"stated experience ({match.job.min_experience_years:g}+ years) is below requested {min_floor:g}+ years"
             )
+            severe_conflict = True
+
+    if adjacent_items and not role_items and match.status != "needs_verification":
+        match.status = "alternative"
 
     if uncertain_reasons:
-        match.status = "needs_verification"
+        if match.status != "alternative" or severe_conflict:
+            match.status = "needs_verification"
         for reason in uncertain_reasons:
             if reason not in match.risks:
                 match.risks.append(reason)

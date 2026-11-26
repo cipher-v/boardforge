@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 import os
 from typing import Protocol, runtime_checkable
 
@@ -9,8 +10,15 @@ from boardforge.store import Store
 
 @runtime_checkable
 class StoreProtocol(Protocol):
-    def upsert_source_jobs(self, source_kind: str, source_key: str, jobs: list[Job]) -> SyncSummary: ...
-    def active_jobs(self) -> list[Job]: ...
+    def upsert_source_jobs(
+        self,
+        source_kind: str,
+        source_key: str,
+        jobs: list[Job],
+        *,
+        allow_verified_empty: bool = False,
+    ) -> SyncSummary: ...
+    def active_jobs(self, *, include_stale: bool = False) -> list[Job]: ...
     def candidate_jobs(
         self,
         query: str,
@@ -64,6 +72,7 @@ class StoreProtocol(Protocol):
     def record_discovered_source(
         self, source_kind: str, source_key: str, board_url: str, query: str,
         *, synced: bool = False, status: str = "discovered",
+        synced_at: datetime | None = None, discovered_at: datetime | None = None,
     ) -> None: ...
 
 

@@ -112,6 +112,38 @@ def main() -> None:
     p_sync_sources.add_argument("--limit", type=int, default=25)
     p_sync_sources.add_argument("--concurrency", type=int, default=4)
 
+    p_seed = sub.add_parser(
+        "seed-sources",
+        help="Validate (default) or sync a curated JSON list of official ATS board URLs.",
+    )
+    p_seed.add_argument("sources_file")
+    p_seed.add_argument(
+        "--apply", action="store_true",
+        help="Actually synchronize and register boards; default is offline dry-run validation.",
+    )
+    p_seed.add_argument(
+        "--expect-database", default=None,
+        help="Required with --apply: exact connected database name or identity.",
+    )
+    p_seed.add_argument("--concurrency", type=int, default=3)
+
+    p_register_indexed = sub.add_parser(
+        "register-indexed-sources",
+        help="Inspect (default dry-run) or register already-indexed trusted ATS boards for periodic maintenance.",
+    )
+    p_register_indexed.add_argument(
+        "--apply", action="store_true",
+        help="Write missing discovered_sources rows; defaults to read-only dry-run.",
+    )
+    p_register_indexed.add_argument(
+        "--expect-database", default=None,
+        help="Exact connected database name or identity (required with --apply; optional in dry-run).",
+    )
+    p_register_indexed.add_argument(
+        "--interval-seconds", type=int, default=3600,
+        help="Maintenance interval used to report whether each indexed board is fresh or due.",
+    )
+
     p_reenrich = sub.add_parser("reenrich-index")
     p_reenrich.add_argument(
         "--apply",
@@ -339,6 +371,56 @@ def main() -> None:
         _print_json(out)
         return
 
+    if args.cmd == "seed-sources":
+        from boardforge.seeding import (
+            apply_seed_sources, assert_expected_database, load_seed_file, validate_seed_sources,
+        )
+
+        checked = validate_seed_sources(load_seed_file(args.sources_file))
+        if not args.apply:
+            _print_json({"mode": "dry_run", "network_calls": 0, **checked})
+            return
+        store = create_store()
+        try:
+            identity = assert_expected_database(store, args.expect_database)
+            results = asyncio.run(apply_seed_sources(
+                store, checked["valid"], concurrency=args.concurrency,
+            ))
+        finally:
+            if hasattr(store, "close"):
+                store.close()
+        _print_json({
+            "mode": "applied", "database": identity, "rejected": checked["rejected"],
+            "synced": sum(r["status"] == "synced" for r in results),
+            "failed": sum(r["status"] == "failed" for r in results),
+            "results": results,
+        })
+        return
+
+    if args.cmd == "register-indexed-sources":
+        from boardforge.seeding import assert_expected_database, register_indexed_sources
+
+        if args.apply and not args.expect_database:
+            raise RuntimeError("--apply requires --expect-database to confirm the target database")
+        if not args.apply and not os.getenv("DATABASE_URL", "").strip():
+            db_path = Path(os.getenv("BOARDFORGE_DB_PATH", "boardforge.db"))
+            if not db_path.exists():
+                raise RuntimeError(f"SQLite database does not exist for dry-run inspection: {db_path}")
+        store = create_store()
+        try:
+            if args.expect_database:
+                assert_expected_database(store, args.expect_database)
+            out = register_indexed_sources(
+                store,
+                apply=args.apply,
+                interval_seconds=args.interval_seconds,
+            )
+        finally:
+            if hasattr(store, "close"):
+                store.close()
+        _print_json(out)
+        return
+
     if args.cmd == "reenrich-index":
         from boardforge.enrich import reenrich_store_jobs
 
@@ -396,6 +478,13 @@ def main() -> None:
 
     if args.cmd == "sync":
         out = asyncio.run(sync_url(args.url, store)).model_dump()
+        from boardforge.connectors.detect import detect_source
+
+        source = detect_source(args.url)
+        store.record_discovered_source(
+            source.kind, source.key, source.board_url, "manual-cli",
+            synced=True, status="synced",
+        )
     elif args.cmd == "prefs":
         result = asyncio.run(agent.update_preferences(args.profile, args.text))
         out = result.data

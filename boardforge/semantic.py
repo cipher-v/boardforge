@@ -550,13 +550,20 @@ async def hybrid_rank_jobs(
 
         rescored.append(match)
 
+    status_order = {"recommended": 0, "alternative": 1, "needs_verification": 2}
     rescored.sort(
         key=lambda match: (
             bool(match.hard_violations),
-            match.status == "needs_verification",
+            status_order.get(match.status, 2),
             (entry_level_target and bool(SENIORITY_TITLE_RE.search(match.job.title))),
-            (prefs.max_required_experience_years is not None
-             and match.job.min_experience_years is None),
+            (
+                prefs.max_required_experience_years is not None
+                and match.job.min_experience_years is None
+                and not any(
+                    item.kind == "experience" and item.value == "entry-level eligible"
+                    for item in match.evidence
+                )
+            ),
             -match.score,
             match.job.title.lower(),
         )
@@ -584,6 +591,7 @@ async def retrieve_and_rank_jobs(
     embedding_error: str | None = None
     query_embedding_cache_hit = False
     query_embedding_source = "disabled"
+    query_embedding_cost_usd = 0.0
     embedding_started = time.perf_counter()
     if client.enabled and retrieval_query:
         cache_key, normalized_query, config_hash = query_embedding_cache_identity(
@@ -619,6 +627,12 @@ async def retrieve_and_rank_jobs(
                         )
                     semantic_retrieval = True
                     query_embedding_source = "provider"
+                    underlying_provider = getattr(client, "provider", client)
+                    if isinstance(underlying_provider, VertexGeminiEmbeddingProvider):
+                        est_tokens = max(1, math.ceil(len(retrieval_query.encode("utf-8")) / 4))
+                        query_embedding_cost_usd = est_tokens * float(os.getenv(
+                            "BOARDFORGE_VERTEX_EMBEDDING_USD_PER_MILLION", "0.15"
+                        )) / 1_000_000
                 except Exception as exc:
                     query_vector = None
                     embedding_error = f"{type(exc).__name__}: {exc}"
@@ -654,6 +668,7 @@ async def retrieve_and_rank_jobs(
         "semantic_retrieval": semantic_retrieval,
         "query_embedding_cache_hit": query_embedding_cache_hit,
         "query_embedding_source": query_embedding_source,
+        "query_embedding_cost_usd": round(query_embedding_cost_usd, 8),
         "embedding_model": client.model if client.enabled else None,
         "embedding_error": embedding_error,
         "lexical_query": lexical_query,

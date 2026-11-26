@@ -18,6 +18,7 @@ from boardforge.enrich import infer_country
 from boardforge.matching import job_text
 from boardforge.semantic import POSTGRES_EMBEDDING_DIMENSIONS
 from boardforge.models import CandidateProfile, FeedbackRequest, Job, Preferences, SyncSummary
+from boardforge.store import stale_job_cutoff
 
 
 def _utcnow() -> datetime:
@@ -109,7 +110,14 @@ class PostgresStore:
             ),
         )
 
-    def upsert_source_jobs(self, source_kind: str, source_key: str, jobs: list[Job]) -> SyncSummary:
+    def upsert_source_jobs(
+        self,
+        source_kind: str,
+        source_key: str,
+        jobs: list[Job],
+        *,
+        allow_verified_empty: bool = False,
+    ) -> SyncSummary:
         now = _utcnow()
         inserted = updated = unchanged = missing = closed = 0
         seen = {job.stable_id for job in jobs}
@@ -125,12 +133,13 @@ class PostgresStore:
             ).fetchall()
             existing = {row["stable_id"]: row for row in rows}
             active_count = sum(row["status"] == "active" for row in rows)
-            if active_count and not jobs:
+            if active_count and not jobs and not allow_verified_empty:
                 raise ValueError("refusing to treat an empty fetch as a successful source sync")
-            if active_count >= 10 and len(jobs) < max(1, int(active_count * 0.25)):
+            if active_count >= 10 and 0 < len(jobs) < max(1, int(active_count * 0.25)):
                 raise ValueError(
                     f"refusing abnormal source shrink: fetched {len(jobs)} from {active_count} active jobs"
                 )
+            close_threshold = 3 if (not jobs and active_count >= 10) else 2
             run_id = connection.execute(
                 """INSERT INTO sync_runs(source_kind,source_key,started_at,status,fetched)
                    VALUES(%s,%s,%s,'running',%s) RETURNING id""",
@@ -181,7 +190,7 @@ class PostgresStore:
                     continue
                 missing += 1
                 count = int(row["missing_count"]) + 1
-                if count >= 2:
+                if count >= close_threshold:
                     connection.execute(
                         "UPDATE jobs SET status='closed',missing_count=%s WHERE stable_id=%s",
                         (count, stable_id),
@@ -215,11 +224,18 @@ class PostgresStore:
             for row in rows
         ]
 
-    def active_jobs(self) -> list[Job]:
+    def active_jobs(self, *, include_stale: bool = False) -> list[Job]:
+        cutoff = None if include_stale else stale_job_cutoff()
         with self.connect() as connection:
-            rows = connection.execute(
-                "SELECT payload,first_seen,last_seen FROM jobs WHERE status='active'"
-            ).fetchall()
+            if cutoff is None:
+                rows = connection.execute(
+                    "SELECT payload,first_seen,last_seen FROM jobs WHERE status='active'"
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT payload,first_seen,last_seen FROM jobs WHERE status='active' AND last_seen>=%s",
+                    (cutoff,),
+                ).fetchall()
         return self._jobs(rows)
 
     def embedding_candidates(
@@ -229,10 +245,14 @@ class PostgresStore:
         limit: int = 100,
         countries: list[str] | None = None,
     ) -> list[Job]:
-        country_clause = ""
+        cutoff = stale_job_cutoff()
+        extra_clause = ""
         params: list = [model]
+        if cutoff is not None:
+            extra_clause += " AND j.last_seen >= %s"
+            params.append(cutoff)
         if countries:
-            country_clause = (
+            extra_clause += (
                 " AND lower(COALESCE(j.payload->>'country','')) = ANY(%s)"
             )
             params.append([country.casefold() for country in countries])
@@ -245,7 +265,7 @@ class PostgresStore:
                      ON e.stable_id=j.stable_id AND e.model=%s
                    WHERE j.status='active'
                      AND (e.stable_id IS NULL OR e.content_hash<>j.embedding_hash)"""
-                + country_clause
+                + extra_clause
                 + " ORDER BY j.last_seen DESC LIMIT %s",
                 tuple(params),
             ).fetchall()
@@ -356,6 +376,10 @@ class PostgresStore:
 
         normalized = " ".join(query.split())
         filters, filter_params = self._candidate_filter_clause(preferences)
+        cutoff = stale_job_cutoff()
+        if cutoff is not None:
+            filters = " AND (j.last_seen >= %s)" + filters
+            filter_params = [cutoff, *filter_params]
 
         with self.connect() as connection:
             if not normalized and query_vector is None:
@@ -449,6 +473,10 @@ class PostgresStore:
             )
         normalized = " ".join(query.split())
         filters, filter_params = self._candidate_filter_clause(preferences)
+        cutoff = stale_job_cutoff()
+        if cutoff is not None:
+            filters = " AND (j.last_seen >= %s)" + filters
+            filter_params = [cutoff, *filter_params]
         if not normalized and query_vector is None:
             sql = (
                 "SELECT j.payload,j.first_seen,j.last_seen FROM jobs j "
@@ -890,8 +918,25 @@ class PostgresStore:
         *,
         synced: bool = False,
         status: str = "discovered",
+        synced_at: datetime | None = None,
+        discovered_at: datetime | None = None,
     ) -> None:
+        def _as_utc(val: datetime) -> datetime:
+            dt = val if val.tzinfo is not None else val.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+
         now = _utcnow()
+        disc_ts = _as_utc(discovered_at) if discovered_at is not None else now
+        sync_ts = (
+            _as_utc(synced_at)
+            if synced_at is not None
+            else (now if synced else None)
+        )
+        last_disc_ts = (
+            sync_ts
+            if (discovered_at is not None and sync_ts is not None and sync_ts > disc_ts)
+            else disc_ts
+        )
         with self.connect() as connection:
             connection.execute(
                 """INSERT INTO discovered_sources
@@ -900,12 +945,17 @@ class PostgresStore:
                    VALUES(%s,%s,%s,%s,%s,%s,%s,%s)
                    ON CONFLICT(source_kind,source_key) DO UPDATE SET
                      board_url=excluded.board_url,discovery_query=excluded.discovery_query,
-                     last_discovered=excluded.last_discovered,
-                     last_synced=COALESCE(excluded.last_synced,discovered_sources.last_synced),
+                     first_discovered=LEAST(excluded.first_discovered,discovered_sources.first_discovered),
+                     last_discovered=GREATEST(excluded.last_discovered,discovered_sources.last_discovered),
+                     last_synced=CASE
+                       WHEN excluded.last_synced IS NOT NULL AND discovered_sources.last_synced IS NOT NULL
+                         THEN GREATEST(excluded.last_synced,discovered_sources.last_synced)
+                       ELSE COALESCE(excluded.last_synced,discovered_sources.last_synced)
+                     END,
                      last_status=excluded.last_status""",
                 (
-                    source_kind, source_key, board_url, query, now, now,
-                    now if synced else None, status,
+                    source_kind, source_key, board_url, query, disc_ts, last_disc_ts,
+                    sync_ts, status,
                 ),
             )
 
@@ -938,7 +988,14 @@ class PostgresStore:
             return connection.execute(
                 """SELECT source_kind,source_key,board_url,last_synced,last_status
                    FROM discovered_sources
-                   WHERE last_synced IS NULL OR last_synced<=%s
-                   ORDER BY COALESCE(last_synced,first_discovered) LIMIT %s""",
-                (cutoff, max(1, min(limit, 500))),
+                   WHERE (last_status != 'failed' AND (last_synced IS NULL OR last_synced<=%s))
+                      OR (last_status = 'failed' AND last_discovered<=%s)
+                   ORDER BY CASE
+                     WHEN last_status = 'failed'
+                       THEN GREATEST(COALESCE(last_synced,first_discovered), last_discovered)
+                     ELSE COALESCE(last_synced,first_discovered)
+                   END ASC,
+                   source_kind ASC, source_key ASC
+                   LIMIT %s""",
+                (cutoff, cutoff, max(1, min(limit, 500))),
             ).fetchall()

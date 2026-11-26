@@ -12,7 +12,7 @@ import httpx
 from boardforge.database import StoreProtocol
 from boardforge.discovery.web import SearchProvider, create_search_provider, discover_and_sync
 from boardforge.models import CandidateProfile, Preferences
-from boardforge.preferences import effective_search_preferences
+from boardforge.preferences import effective_search_preferences, strip_orchestration_instructions
 
 
 _LOCAL_DRAIN_RUNNING: set[int] = set()
@@ -28,13 +28,14 @@ def discovery_fingerprint(
     *,
     profile_id: str = "",
 ) -> str:
+    clean_q = strip_orchestration_instructions(query)
     effective = (
-        effective_search_preferences(preferences, query)
-        if query.strip()
+        effective_search_preferences(preferences, clean_q)
+        if clean_q.strip()
         else preferences
     )
     payload = {
-        "query": " ".join(query.casefold().split()),
+        "query": " ".join(clean_q.casefold().split()),
         "roles": effective.roles or profile.target_roles or profile.role_signals,
         "locations": effective.locations,
         "countries": effective.countries,

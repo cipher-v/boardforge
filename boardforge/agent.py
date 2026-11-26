@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import time
 from boardforge.models import FeedbackRequest
 from boardforge.database import StoreProtocol
 from boardforge.planning import plan_tools
@@ -47,6 +48,7 @@ class JobAgent:
     ) -> AgentResult:
         if "\x00" in query or "\x00" in profile_id:
             raise ValueError("input must not contain NUL bytes")
+        search_started = time.perf_counter()
         top_k = max(1, min(int(top_k), 50))
         saved = self.store.load_preferences(profile_id)
         prefs = effective_search_preferences(saved, query) if query else saved
@@ -80,6 +82,16 @@ class JobAgent:
         )
         retrieval["relevance_verification"] = verification
         retrieval["pre_verification_pool_size"] = retrieval_k
+        ver_ms = float((verification.get("latency_ms") or {}).get("total", 0.0))
+        retrieval.setdefault("latency_ms", {})["relevance_verification"] = round(ver_ms, 2)
+        retrieval["latency_ms"]["total_search"] = round((time.perf_counter() - search_started) * 1000, 2)
+        emb_cost = float(retrieval.get("query_embedding_cost_usd", 0.0) or 0.0)
+        ver_cost = float(verification.get("estimated_cost_usd", 0.0) or 0.0)
+        retrieval["cost_usd"] = {
+            "query_embedding": round(emb_cost, 8),
+            "relevance_verification": round(ver_cost, 8),
+            "total": round(emb_cost + ver_cost, 8),
+        }
         matches = matches[:top_k]
         return AgentResult(
             f"Found {len(matches)} ranked jobs.",
@@ -92,6 +104,7 @@ class JobAgent:
 
     async def recommend_jobs(self, profile_id: str, top_k: int = 15) -> AgentResult:
         """Resume-led recommendations that stay within relevant role families."""
+        rec_started = time.perf_counter()
         top_k = max(1, min(int(top_k), 50))
         saved = self.store.load_preferences(profile_id)
         candidate_profile = self.store.load_candidate_profile(profile_id)
@@ -128,6 +141,16 @@ class JobAgent:
         )
         retrieval["relevance_verification"] = verification
         retrieval["pre_verification_pool_size"] = retrieval_k
+        ver_ms = float((verification.get("latency_ms") or {}).get("total", 0.0))
+        retrieval.setdefault("latency_ms", {})["relevance_verification"] = round(ver_ms, 2)
+        retrieval["latency_ms"]["total_search"] = round((time.perf_counter() - rec_started) * 1000, 2)
+        emb_cost = float(retrieval.get("query_embedding_cost_usd", 0.0) or 0.0)
+        ver_cost = float(verification.get("estimated_cost_usd", 0.0) or 0.0)
+        retrieval["cost_usd"] = {
+            "query_embedding": round(emb_cost, 8),
+            "relevance_verification": round(ver_cost, 8),
+            "total": round(emb_cost + ver_cost, 8),
+        }
         matches = matches[:top_k]
         return AgentResult(
             f"Found {len(matches)} resume-based recommendations.",

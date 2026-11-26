@@ -47,8 +47,13 @@ class LeverConnector(JobConnector):
             r = await client.get(endpoint)
         if r.status_code != 200:
             raise ConnectorError(f"Lever fetch failed: {r.status_code}")
+        payload = r.json()
+        if not isinstance(payload, list):
+            raise ConnectorError("Lever malformed response: expected postings list")
         jobs = []
-        for item in r.json():
+        for item in payload:
+            if not isinstance(item, dict) or not item.get("id"):
+                raise ConnectorError("Lever malformed job entry")
             cats = item.get("categories") or {}
             description = _text(item)
             lowered = f"{item.get('text','')} {description}".lower()

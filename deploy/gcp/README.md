@@ -34,7 +34,19 @@ Add `-PublicApi` only when exposing the web UI publicly; when `-PublicApi` is se
 
 Any individual gate can be turned off at deploy time via `-EnableEmbeddings:$false`, `-EnableRelevanceVerifier:$false`, or `-EnableIntelligentAgent:$false`.
 
-When a user clicks **Discover more opportunities** (`POST /discover/{profile_id}`) or an explicit conditional agent turn queues `discover_job_sources`, the API persists a deduplicated `'queued'` row in PostgreSQL and dispatches `boardforge-maintenance` on demand via the Cloud Run Jobs v2 `:run` API (scoped via `roles/run.developer` on `boardforge-maintenance` only, with a per-instance dispatch cooldown and `--parallelism 1 --tasks 1`). You may also schedule periodic source refreshes via Cloud Scheduler or run a manual cycle:
+When a user clicks **Discover more opportunities** (`POST /discover/{profile_id}`) or an explicit conditional agent turn queues `discover_job_sources`, the API persists a deduplicated `'queued'` row in PostgreSQL and dispatches `boardforge-maintenance` on demand via the Cloud Run Jobs v2 `:run` API (scoped via `roles/run.developer` on `boardforge-maintenance` only, with a per-instance dispatch cooldown and `--parallelism 1 --tasks 1`).
+
+## Optional 12-Hour Scheduled Maintenance (Cloud Scheduler)
+
+To keep registered ATS boards fresh without an always-running worker, pass `-EnableScheduledMaintenance` to create or update an OAuth-authenticated Cloud Scheduler HTTP trigger (`0 */12 * * *` UTC by default) targeting the existing `boardforge-maintenance` Cloud Run Job `:run` endpoint:
+
+```powershell
+.\deploy\gcp\deploy.ps1 -ProjectId YOUR_PROJECT_ID -Region us-central1 -EnableScheduledMaintenance
+```
+
+Each scheduled run executes `python -m boardforge.worker --once`, refreshing due boards in least-recently-attempted order without starvation and skipping embedding generation for unchanged jobs. Unrefreshed active jobs older than `BOARDFORGE_STALE_JOB_MAX_AGE_DAYS` (default `30` days) are hidden from candidate search without deleting stored records.
+
+You can also run a manual cycle at any time:
 
 ```powershell
 gcloud run jobs execute boardforge-maintenance --region us-central1 --wait

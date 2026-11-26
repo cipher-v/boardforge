@@ -12,6 +12,11 @@ param(
     [bool] $EnableEmbeddings = $true,
     [bool] $EnableRelevanceVerifier = $true,
     [bool] $EnableIntelligentAgent = $true,
+    [switch] $EnableScheduledMaintenance,
+    [string] $MaintenanceSchedule = "0 */12 * * *",
+    [string] $MaintenanceTimeZone = "Etc/UTC",
+    [string] $SchedulerJobName = "",
+    [int] $StaleJobMaxAgeDays = 30,
     [switch] $PublicApi
 )
 
@@ -48,6 +53,7 @@ $workerRuntimeEnv = @(
     "BOARDFORGE_DISCOVERY_REQUESTS_PER_CYCLE=5",
     "BOARDFORGE_SOURCE_SYNC_LIMIT=10",
     "BOARDFORGE_SOURCE_SYNC_CONCURRENCY=4",
+    "BOARDFORGE_STALE_JOB_MAX_AGE_DAYS=$StaleJobMaxAgeDays",
     "BOARDFORGE_ENABLE_EMBEDDINGS=$embeddingsFlag",
     "BOARDFORGE_EMBEDDING_PROVIDER=vertex",
     "BOARDFORGE_EMBEDDING_MODEL=gemini-embedding-001",
@@ -99,6 +105,19 @@ gcloud run jobs deploy $JobName --image $image --region $Region --project $Proje
 gcloud run jobs add-iam-policy-binding $JobName --region $Region --project $ProjectId --member "serviceAccount:$serviceAccount" --role roles/run.developer
 
 gcloud run deploy $ServiceName --image $image --region $Region --project $ProjectId --service-account $serviceAccount --port 8080 --set-env-vars $apiRuntimeEnv --set-secrets $secrets $access
+
+if ($EnableScheduledMaintenance) {
+    $resolvedSchedulerJob = if ($SchedulerJobName) { $SchedulerJobName } else { "$JobName-12h" }
+    $jobRunUri = "https://run.googleapis.com/v2/projects/$ProjectId/locations/$Region/jobs/$JobName`:run"
+    gcloud services enable cloudscheduler.googleapis.com --project $ProjectId
+    gcloud scheduler jobs describe $resolvedSchedulerJob --location $Region --project $ProjectId 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        gcloud scheduler jobs update http $resolvedSchedulerJob --location $Region --project $ProjectId --schedule $MaintenanceSchedule --time-zone $MaintenanceTimeZone --uri $jobRunUri --http-method POST --oauth-service-account-email $serviceAccount --oauth-token-scope "https://www.googleapis.com/auth/cloud-platform"
+    } else {
+        gcloud scheduler jobs create http $resolvedSchedulerJob --location $Region --project $ProjectId --schedule $MaintenanceSchedule --time-zone $MaintenanceTimeZone --uri $jobRunUri --http-method POST --oauth-service-account-email $serviceAccount --oauth-token-scope "https://www.googleapis.com/auth/cloud-platform" --description "Invoke BoardForge one-shot maintenance job every 12 hours"
+    }
+    Write-Host "Configured optional Cloud Scheduler job $resolvedSchedulerJob ($MaintenanceSchedule $MaintenanceTimeZone) -> $JobName."
+}
 
 Write-Host "Deployed $ServiceName and on-demand Cloud Run Job $JobName."
 Write-Host "Manual maintenance check: gcloud run jobs execute $JobName --region $Region --project $ProjectId --wait"

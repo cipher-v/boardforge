@@ -163,6 +163,27 @@ def _utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def stale_job_cutoff(now: datetime | None = None) -> datetime | None:
+    """Return the UTC last_seen cutoff below which unrefreshed active jobs are hidden.
+
+    Configured via BOARDFORGE_STALE_JOB_MAX_AGE_DAYS (default 30 days). Setting <= 0
+    disables age-based hiding. Jobs are never deleted from storage due to age.
+    """
+    raw = os.getenv("BOARDFORGE_STALE_JOB_MAX_AGE_DAYS", "30").strip()
+    try:
+        max_age_days = float(raw)
+    except ValueError:
+        max_age_days = 30.0
+    if max_age_days <= 0:
+        return None
+    ref = (
+        now.astimezone(timezone.utc)
+        if (now is not None and now.tzinfo is not None)
+        else (now.replace(tzinfo=timezone.utc) if now is not None else datetime.now(timezone.utc))
+    )
+    return ref - timedelta(days=max_age_days)
+
+
 def _digest(job: Job) -> str:
     raw = job.model_dump_json(exclude_none=True)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
@@ -239,7 +260,14 @@ class Store:
             (stable_id, event_type, observed_at, previous_payload, current_payload, run_id),
         )
 
-    def upsert_source_jobs(self, source_kind: str, source_key: str, jobs: list[Job]) -> SyncSummary:
+    def upsert_source_jobs(
+        self,
+        source_kind: str,
+        source_key: str,
+        jobs: list[Job],
+        *,
+        allow_verified_empty: bool = False,
+    ) -> SyncSummary:
         now = _utcnow()
         inserted = updated = unchanged = missing = closed = 0
         seen = {job.stable_id for job in jobs}
@@ -254,12 +282,15 @@ class Store:
                 )
             }
             active_count = sum(row["status"] == "active" for row in existing.values())
-            if active_count and not jobs:
+            if active_count and not jobs and not allow_verified_empty:
                 raise ValueError("refusing to treat an empty fetch as a successful source sync")
-            if active_count >= 10 and len(jobs) < max(1, int(active_count * 0.25)):
+            if active_count >= 10 and 0 < len(jobs) < max(1, int(active_count * 0.25)):
                 raise ValueError(
                     f"refusing abnormal source shrink: fetched {len(jobs)} from {active_count} active jobs"
                 )
+            # Require multi-cycle confirmation before closing jobs; larger boards require 3
+            # consecutive verified-empty syncs to close on an empty response.
+            close_threshold = 3 if (not jobs and active_count >= 10) else 2
 
             cursor = connection.execute(
                 """INSERT INTO sync_runs(source_kind,source_key,started_at,status,fetched)
@@ -309,7 +340,7 @@ class Store:
                     continue
                 missing += 1
                 new_missing_count = int(row["missing_count"]) + 1
-                if new_missing_count >= 2:
+                if new_missing_count >= close_threshold:
                     connection.execute(
                         "UPDATE jobs SET status='closed',missing_count=? WHERE stable_id=?",
                         (new_missing_count, stable_id),
@@ -343,18 +374,30 @@ class Store:
             run_id=run_id,
         )
 
-    def active_jobs(self) -> list[Job]:
+    @staticmethod
+    def _as_utc(raw: str) -> datetime:
+        parsed = datetime.fromisoformat(raw)
+        return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
+
+    def active_jobs(self, *, include_stale: bool = False) -> list[Job]:
+        cutoff = None if include_stale else stale_job_cutoff()
         with self.connect() as connection:
             rows = connection.execute(
                 "SELECT payload,first_seen,last_seen FROM jobs WHERE status='active'"
             ).fetchall()
-        return [
-            Job.model_validate_json(row["payload"]).model_copy(update={
-                "first_seen_at": datetime.fromisoformat(row["first_seen"]),
-                "last_seen_at": datetime.fromisoformat(row["last_seen"]),
-            })
-            for row in rows
-        ]
+        jobs: list[Job] = []
+        for row in rows:
+            first_seen_dt = self._as_utc(row["first_seen"])
+            last_seen_dt = self._as_utc(row["last_seen"])
+            if cutoff is not None and last_seen_dt < cutoff:
+                continue
+            jobs.append(
+                Job.model_validate_json(row["payload"]).model_copy(update={
+                    "first_seen_at": first_seen_dt,
+                    "last_seen_at": last_seen_dt,
+                })
+            )
+        return jobs
 
     def candidate_jobs(
         self,
@@ -379,6 +422,7 @@ class Store:
         limit: int = 100,
         countries: list[str] | None = None,
     ) -> list[Job]:
+        cutoff = stale_job_cutoff()
         with self.connect() as connection:
             rows = connection.execute(
                 """SELECT j.payload,j.first_seen,j.last_seen,e.content_hash AS embedded_hash
@@ -389,9 +433,13 @@ class Store:
             ).fetchall()
         jobs: list[Job] = []
         for row in rows:
+            first_seen_dt = self._as_utc(row["first_seen"])
+            last_seen_dt = self._as_utc(row["last_seen"])
+            if cutoff is not None and last_seen_dt < cutoff:
+                continue
             job = Job.model_validate_json(row["payload"]).model_copy(update={
-                "first_seen_at": datetime.fromisoformat(row["first_seen"]),
-                "last_seen_at": datetime.fromisoformat(row["last_seen"]),
+                "first_seen_at": first_seen_dt,
+                "last_seen_at": last_seen_dt,
             })
             digest = hashlib.sha256(job_text(job)[:6000].encode("utf-8")).hexdigest()
             if row["embedded_hash"] != digest:
@@ -786,8 +834,25 @@ class Store:
         *,
         synced: bool = False,
         status: str = "discovered",
+        synced_at: datetime | None = None,
+        discovered_at: datetime | None = None,
     ) -> None:
-        now = _utcnow()
+        def _iso_utc(val: datetime) -> str:
+            dt = val if val.tzinfo is not None else val.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc).isoformat()
+
+        now_iso = _utcnow()
+        disc_iso = _iso_utc(discovered_at) if discovered_at is not None else now_iso
+        sync_iso = (
+            _iso_utc(synced_at)
+            if synced_at is not None
+            else (now_iso if synced else None)
+        )
+        last_disc_iso = (
+            _iso_utc(synced_at)
+            if (discovered_at is not None and synced_at is not None and synced_at > discovered_at)
+            else disc_iso
+        )
         with self.connect() as connection:
             connection.execute(
                 """INSERT INTO discovered_sources
@@ -797,12 +862,17 @@ class Store:
                    ON CONFLICT(source_kind,source_key) DO UPDATE SET
                      board_url=excluded.board_url,
                      discovery_query=excluded.discovery_query,
-                     last_discovered=excluded.last_discovered,
-                     last_synced=COALESCE(excluded.last_synced,discovered_sources.last_synced),
+                     first_discovered=MIN(excluded.first_discovered,discovered_sources.first_discovered),
+                     last_discovered=MAX(excluded.last_discovered,discovered_sources.last_discovered),
+                     last_synced=CASE
+                       WHEN excluded.last_synced IS NOT NULL AND discovered_sources.last_synced IS NOT NULL
+                         THEN MAX(excluded.last_synced,discovered_sources.last_synced)
+                       ELSE COALESCE(excluded.last_synced,discovered_sources.last_synced)
+                     END,
                      last_status=excluded.last_status""",
                 (
-                    source_kind, source_key, board_url, query, now, now,
-                    now if synced else None, status,
+                    source_kind, source_key, board_url, query, disc_iso, last_disc_iso,
+                    sync_iso, status,
                 ),
             )
 
@@ -832,13 +902,21 @@ class Store:
 
     def sources_due(self, *, interval_seconds: int = 3600, limit: int = 25) -> list[dict]:
         cutoff = datetime.now(timezone.utc) - timedelta(seconds=max(60, interval_seconds))
+        cutoff_iso = cutoff.isoformat()
         with self.connect() as connection:
             rows = connection.execute(
                 """SELECT source_kind,source_key,board_url,last_synced,last_status
                    FROM discovered_sources
-                   WHERE last_synced IS NULL OR last_synced<=?
-                   ORDER BY COALESCE(last_synced,first_discovered) LIMIT ?""",
-                (cutoff.isoformat(), max(1, min(limit, 500))),
+                   WHERE (last_status != 'failed' AND (last_synced IS NULL OR last_synced<=?))
+                      OR (last_status = 'failed' AND last_discovered<=?)
+                   ORDER BY CASE
+                     WHEN last_status = 'failed'
+                       THEN MAX(COALESCE(last_synced,first_discovered), last_discovered)
+                     ELSE COALESCE(last_synced,first_discovered)
+                   END ASC,
+                   source_kind ASC, source_key ASC
+                   LIMIT ?""",
+                (cutoff_iso, cutoff_iso, max(1, min(limit, 500))),
             ).fetchall()
         return [dict(row) for row in rows]
 

@@ -5,8 +5,9 @@ from datetime import datetime, timezone
 import hashlib
 import os
 import re
+import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 from urllib.parse import urlparse
 
@@ -27,6 +28,7 @@ from boardforge.preferences import (
     effective_search_preferences,
     is_entry_level_target,
     is_explicit_senior_query,
+    strip_orchestration_instructions,
 )
 from boardforge.resume import apply_candidate_context
 from boardforge.sync import sync_url
@@ -81,6 +83,28 @@ _NON_TECH_TITLE_RE = re.compile(
     r"event\s+marketing|partner\s+marketing|executive\s+assistant)\b",
     re.I,
 )
+_NON_VACANCY_HIT_RE = re.compile(
+    r"\b(?:submit\s+(?:a|that)\s+referral|referral\s+here|talent\s+(?:pool|community)|"
+    r"general\s+application|not\s+currently\s+posted|no\s+(?:current\s+)?open\s+(?:positions?|roles?))\b",
+    re.I,
+)
+_CRM_SUPPORT_HIT_TITLE_RE = re.compile(
+    r"\b(?:salesforce|agentforce|servicenow|workday|netsuite|amazon\s+connect|"
+    r"contact\s+center|support\s+engineer|technical\s+support|customer\s+support|"
+    r"it\s+support|help\s*desk|qa\s+consultant|solutions?\s+consultant|"
+    r"engagement\s+manager|delivery\s+manager)\b",
+    re.I,
+)
+_OFF_TARGET_AI_HIT_TITLE_RE = re.compile(
+    r"\b(?:devops|sre|site\s+reliability|security\s+engineer|cybersecurity|"
+    r"solutions?\s+engineer|forward[- ]deployed|sales\s+engineer|customer\s+engineer)\b",
+    re.I,
+)
+_VALID_BOARD_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{1,79}$", re.I)
+_RESERVED_BOARD_SLUGS = {
+    "embed", "jobs", "apply", "search", "login", "signin", "signup",
+    "privacy", "terms", "api", "boards", "careers", "openings",
+}
 _JUNIOR_SIGNAL_RE = re.compile(
     r"\b(?:entry[- ]level|early[- ]career|junior|jr\.?|freshers?|new\s+grads?|"
     r"recent\s+graduates?|intern(?:ship)?|associate\s+(?:software|backend|ml|ai|data|qa)|"
@@ -180,10 +204,13 @@ class DiscoveryReport:
     jobs_updated: int = 0
     new_matching_jobs: int = 0
     new_recommended_jobs: int = 0
+    failed_boards: int = 0
     failures: int = 0
     reason: str = ""
     retryable: bool = False
     error_kind: str = ""
+    estimated_cost_usd: float = 0.0
+    latency_ms: dict[str, float] = field(default_factory=dict)
 
     def as_dict(self) -> dict:
         return {
@@ -195,6 +222,7 @@ class DiscoveryReport:
             "skipped_existing_boards": self.skipped_existing_boards,
             "skipped_low_relevance_boards": self.skipped_low_relevance_boards,
             "synced_boards": self.synced_boards,
+            "failed_boards": self.failed_boards,
             "jobs_fetched": self.jobs_fetched,
             "jobs_inserted": self.jobs_inserted,
             "jobs_updated": self.jobs_updated,
@@ -204,6 +232,8 @@ class DiscoveryReport:
             "reason": self.reason,
             "retryable": self.retryable,
             "error_kind": self.error_kind,
+            "estimated_cost_usd": round(self.estimated_cost_usd, 8),
+            "latency_ms": dict(self.latency_ms),
         }
 
 
@@ -398,7 +428,7 @@ def build_discovery_query(
     query: str = "",
 ) -> str:
     """Build a focused job-posting search query aligned with domain, geography, and seniority."""
-    raw_query = query.strip()
+    raw_query = strip_orchestration_instructions(query).strip()
     effective = effective_search_preferences(prefs, raw_query) if raw_query else prefs
 
     if not raw_query:
@@ -486,8 +516,8 @@ def _valid_supported_ats_source(url: str) -> SourceRef | None:
         source = detect_source(url)
         if source.kind not in {"greenhouse", "lever", "ashby"} or not source.key:
             return None
-        # Greenhouse embed endpoints without a company slug are not board keys.
-        if source.key.casefold() in {"embed", "jobs", "apply"}:
+        slug = source.key.strip()
+        if slug.casefold() in _RESERVED_BOARD_SLUGS or not _VALID_BOARD_SLUG_RE.match(slug):
             return None
         return source
     except Exception:
@@ -607,6 +637,10 @@ def _matches_occupational_intent(
     title_low = hit.title.casefold()
     snippet_low = hit.snippet.casefold()
     combined_low = f"{title_low} {snippet_low}"
+    clean_q = strip_orchestration_instructions(query).casefold()
+
+    if _NON_VACANCY_HIT_RE.search(combined_low):
+        return False, -5.0
 
     tech_roles_requested = bool(
         set(effective.roles)
@@ -615,9 +649,38 @@ def _matches_occupational_intent(
     if tech_roles_requested and _NON_TECH_TITLE_RE.search(title_low):
         return False, -4.0
 
+    core_eng_requested = bool(
+        set(effective.roles)
+        & {"AI/ML", "Computer Vision", "Backend", "Software Engineering", "Data Engineering", "Data Science"}
+    )
+    if (
+        core_eng_requested
+        and _CRM_SUPPORT_HIT_TITLE_RE.search(title_low)
+        and not _CRM_SUPPORT_HIT_TITLE_RE.search(clean_q)
+    ):
+        return False, -4.0
+
+    # If the user specifically requested Computer Vision and/or Machine Learning (not generic AI/Agentforce),
+    # do not let incidental company boilerplate mentioning "AI" or Salesforce/DevOps/Security titles qualify a board.
+    ml_cv_specifically_requested = bool(
+        re.search(r"\b(?:computer\s+vision|machine\s+learning|deep\s+learning|\bml\b)\b", clean_q)
+        and not re.search(r"\b(?:ai\s+agents?|agentic|genai|generative\s+ai|llm|rag)\b", clean_q)
+    )
+    if ml_cv_specifically_requested:
+        if _OFF_TARGET_AI_HIT_TITLE_RE.search(title_low) and not _OFF_TARGET_AI_HIT_TITLE_RE.search(clean_q):
+            return False, -3.5
+        if not re.search(
+            r"\b(?:computer\s+vision|vision\s+engineer|perception|image\s+processing|opencv|"
+            r"machine\s+learning|ml\s+engineer|deep\s+learning|pytorch|tensorflow|neural)\b",
+            combined_low,
+        ):
+            return False, -3.5
+
     score = 0.0
     matched_role = False
     for role in effective.roles:
+        if role in {"AI/ML", "Computer Vision"} and _OFF_TARGET_AI_HIT_TITLE_RE.search(title_low) and not _OFF_TARGET_AI_HIT_TITLE_RE.search(clean_q):
+            continue
         patterns = ROLE_PATTERNS.get(role, ())
         if any(re.search(p, title_low, re.I) for p in patterns):
             score += 3.0
@@ -632,7 +695,7 @@ def _matches_occupational_intent(
                     matched_role = True
                     break
 
-    intent = parse_query_intent(effective, query) if query.strip() else None
+    intent = parse_query_intent(effective, clean_q) if clean_q.strip() else None
     specific = set(intent.specific_terms) if intent else set()
     matched_specific = [
         term for term in specific
@@ -642,8 +705,12 @@ def _matches_occupational_intent(
         score += min(2.5, 0.9 * len(matched_specific))
 
     if (effective.roles or specific) and not matched_role and not matched_specific:
-        # Allow generic "Software Engineer" title when technical skills appear in snippet
-        if tech_roles_requested and re.search(r"\b(?:software|machine learning|ai|backend|vision|data)\b", title_low):
+        # Allow generic "Software Engineer" title only when technical engineering work is evident in snippet.
+        if (
+            tech_roles_requested
+            and re.search(r"\bsoftware\s+(?:engineer|developer)\b", title_low)
+            and re.search(r"\b(?:python|java|golang|c\+\+|pytorch|tensorflow|backend|apis?|distributed|models?)\b", snippet_low)
+        ):
             score += 1.0
         else:
             return False, -3.0
@@ -725,20 +792,30 @@ def _indexed_source_timestamps(store: StoreProtocol) -> dict[tuple[str, str], da
         key = str(row.get("source_key") or "").casefold()
         if not kind or not key:
             continue
-        raw_synced = row.get("last_synced")
-        synced_at: datetime | None = None
-        if isinstance(raw_synced, datetime):
-            synced_at = raw_synced if raw_synced.tzinfo else raw_synced.replace(tzinfo=timezone.utc)
-        elif isinstance(raw_synced, str) and raw_synced.strip():
-            try:
-                parsed = datetime.fromisoformat(raw_synced)
-                synced_at = parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
-            except ValueError:
-                synced_at = None
-        if synced_at is not None or row.get("last_status") == "synced":
+
+        def _parse_ts(raw_val) -> datetime | None:
+            if isinstance(raw_val, datetime):
+                return raw_val if raw_val.tzinfo else raw_val.replace(tzinfo=timezone.utc)
+            if isinstance(raw_val, str) and raw_val.strip():
+                try:
+                    parsed = datetime.fromisoformat(raw_val)
+                    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+                except ValueError:
+                    return None
+            return None
+
+        synced_at = _parse_ts(row.get("last_synced"))
+        status = str(row.get("last_status") or "")
+        if synced_at is not None or status == "synced":
             prev = indexed.get((kind, key))
             if (kind, key) not in indexed or (synced_at is not None and (prev is None or synced_at > prev)):
                 indexed[(kind, key)] = synced_at
+        elif status == "failed":
+            # Dead/unavailable boards (e.g. 404 ATS slugs) use last_discovered for cooldown
+            # so repeated discoveries do not keep wasting slots on the same broken board.
+            failed_at = _parse_ts(row.get("last_discovered"))
+            if failed_at is not None and (kind, key) not in indexed:
+                indexed[(kind, key)] = failed_at
     return indexed
 
 
@@ -861,12 +938,14 @@ async def discover_and_sync(
         1, min(4, int(os.getenv("BOARDFORGE_DISCOVERY_SYNC_CONCURRENCY", "3")))
     )
 
-    effective_prefs = _effective_discovery_preferences(profile, prefs, query)
+    total_started = time.perf_counter()
+    clean_query = strip_orchestration_instructions(query)
+    effective_prefs = _effective_discovery_preferences(profile, prefs, clean_query)
     rejected_ids = store.rejected_job_ids(profile_id) if profile_id else set()
     before_matches = rank_jobs(
         store.active_jobs(),
         effective_prefs,
-        query=query,
+        query=clean_query,
         top_k=50,
         rejected_ids=rejected_ids,
     )
@@ -875,13 +954,19 @@ async def discover_and_sync(
         m.job.stable_id for m in before_matches if m.status == "recommended"
     }
 
-    discovery_query = build_discovery_query(profile, prefs, query)
+    discovery_query = build_discovery_query(profile, prefs, clean_query)
     report = DiscoveryReport(
         enabled=True,
         provider=provider_name,
         searched_queries=1,
+        estimated_cost_usd=(
+            float(os.getenv("BOARDFORGE_TAVILY_COST_PER_SEARCH_USD", "0"))
+            if provider_name == "tavily"
+            else 0.0
+        ),
     )
 
+    search_started = time.perf_counter()
     hits: list[SearchHit] = []
     try:
         if hasattr(client, "search_results"):
@@ -899,21 +984,25 @@ async def discover_and_sync(
         report.retryable = True
         report.error_kind = type(exc).__name__
         report.reason = str(exc)
+    search_ms = (time.perf_counter() - search_started) * 1000
 
     report.candidate_results = len(hits)
-    sources, skipped_existing, skipped_low = prioritize_discovery_sources(
+    # Keep up to bounded_boards + 2 strictly eligible candidates so a dead 404 board
+    # can fall through to the next eligible board from the same search without touching low-relevance boards.
+    candidate_pool_limit = min(10, bounded_boards + 2)
+    eligible_sources, skipped_existing, skipped_low = prioritize_discovery_sources(
         hits,
         store=store,
         profile=profile,
         prefs=prefs,
-        query=query,
-        max_boards=bounded_boards,
+        query=clean_query,
+        max_boards=candidate_pool_limit,
     )
-    report.discovered_boards = len(sources)
+    report.discovered_boards = min(len(eligible_sources), bounded_boards)
     report.skipped_existing_boards = skipped_existing
     report.skipped_low_relevance_boards = skipped_low
 
-    if not sources and not report.failures:
+    if not eligible_sources and not report.failures:
         if skipped_existing and skipped_low:
             report.reason = (
                 "no new matching job boards found; skipped already-indexed and "
@@ -925,19 +1014,25 @@ async def discover_and_sync(
             report.reason = "search results did not match requested geography, role, or seniority"
         else:
             report.reason = "no supported official job boards were returned"
+        report.latency_ms = {
+            "search_ms": round(search_ms, 2),
+            "sync_ms": 0.0,
+            "ranking_ms": 0.0,
+            "total_ms": round((time.perf_counter() - total_started) * 1000, 2),
+        }
         return report
 
     provenance = (
         "manual:"
         + hashlib.sha256(
-            " ".join(query.casefold().split()).encode("utf-8")
+            " ".join(clean_query.casefold().split()).encode("utf-8")
         ).hexdigest()[:12]
-        if query
+        if clean_query
         else "profile-derived"
     )
     semaphore = asyncio.Semaphore(sync_concurrency)
 
-    async def sync_source(source: SourceRef) -> None:
+    async def sync_source(source: SourceRef) -> bool:
         async with semaphore:
             store.record_discovered_source(
                 source.kind, source.key, source.board_url, provenance
@@ -956,7 +1051,9 @@ async def discover_and_sync(
                     synced=True,
                     status="synced",
                 )
+                return True
             except Exception:
+                report.failed_boards += 1
                 report.failures += 1
                 store.record_discovered_source(
                     source.kind,
@@ -965,14 +1062,26 @@ async def discover_and_sync(
                     provenance,
                     status="failed",
                 )
+                return False
 
-    await asyncio.gather(*(sync_source(source) for source in sources))
+    sync_started = time.perf_counter()
+    primary_batch = eligible_sources[:bounded_boards]
+    backup_batch = eligible_sources[bounded_boards:]
+    if primary_batch:
+        await asyncio.gather(*(sync_source(source) for source in primary_batch))
+    for backup_source in backup_batch:
+        if report.synced_boards >= bounded_boards:
+            break
+        await sync_source(backup_source)
+    report.discovered_boards = report.synced_boards + report.failed_boards
+    sync_ms = (time.perf_counter() - sync_started) * 1000
 
+    ranking_started = time.perf_counter()
     if report.synced_boards > 0:
         after_matches = rank_jobs(
             store.active_jobs(),
             effective_prefs,
-            query=query,
+            query=clean_query,
             top_k=50,
             rejected_ids=rejected_ids,
         )
@@ -984,5 +1093,22 @@ async def discover_and_sync(
             for m in after_matches
             if m.status == "recommended" and m.job.stable_id not in before_recommended_ids
         )
+        if report.new_matching_jobs == 0 and not report.reason:
+            report.reason = (
+                "synchronized board(s) had no active postings matching the requested "
+                "role, location, and experience constraints"
+            )
+    elif report.failed_boards > 0 and not report.reason:
+        report.reason = (
+            f"{report.failed_boards} candidate job board(s) failed synchronization "
+            "(unavailable or delisted ATS board)"
+        )
+    ranking_ms = (time.perf_counter() - ranking_started) * 1000
+    report.latency_ms = {
+        "search_ms": round(search_ms, 2),
+        "sync_ms": round(sync_ms, 2),
+        "ranking_ms": round(ranking_ms, 2),
+        "total_ms": round((time.perf_counter() - total_started) * 1000, 2),
+    }
 
     return report
