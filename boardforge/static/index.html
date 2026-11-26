@@ -94,7 +94,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
   <div class="upload" id="dropzone">
     <div class="upload-main">
       <div class="upload-icon">↑</div>
-      <div><strong>Upload your resume</strong><small>PDF or DOCX · max 5 MB · raw file is not stored</small></div>
+      <div><strong>Upload your resume (optional)</strong><small>Extract skills and suggested roles for personalized job matches. PDF or DOCX · max 5 MB · raw file is not stored</small></div>
     </div>
     <button class="btn primary" id="chooseResume">Choose resume</button>
     <input type="file" id="resumeInput" accept=".pdf,.docx,.txt" hidden>
@@ -107,20 +107,36 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
     <div class="profile-edit">
       <label>Target roles (you confirm)<input id="targetRoles" placeholder="AI/ML, Backend"></label>
       <label>Skills<input id="profileSkills" placeholder="Python, FastAPI, SQL"></label>
+      <div class="hint">Choose where you can work and the maximum experience a job may require. We do not infer these limits from your resume.</div>
+      <label>Preferred job country<select id="onboardCountry" style="display:block;width:100%;padding:9px;border:1px solid var(--line);border-radius:6px;background:white;color:inherit">
+        <option value="">Choose a country or worldwide</option>
+        <option value="India">India</option><option value="USA">United States</option>
+        <option value="United Kingdom">United Kingdom</option><option value="Canada">Canada</option>
+        <option value="Germany">Germany</option><option value="Australia">Australia</option>
+        <option value="Singapore">Singapore</option><option value="worldwide">Worldwide (no country filter)</option>
+      </select></label>
+      <label>Maximum experience required by the job<select id="onboardExperience" style="display:block;width:100%;padding:9px;border:1px solid var(--line);border-radius:6px;background:white;color:inherit">
+        <option value="">Choose an experience limit</option>
+        <option value="0">0 years / fresher</option><option value="1">Up to 1 year</option>
+        <option value="2">Up to 2 years</option><option value="3">Up to 3 years</option>
+        <option value="5">Up to 5 years</option><option value="10">Up to 10 years</option>
+        <option value="unlimited">No experience limit</option>
+      </select></label>
+      <div class="hint">Other countries, city filters, salary and remote preferences can be set below. Existing advanced filters are kept.</div>
     </div>
-    <div class="profile-actions"><button class="btn primary" id="reviewProfile">Confirm profile</button><button class="btn" id="deleteProfile">Delete my data</button></div>
+    <div class="profile-actions"><button class="btn primary" id="reviewProfile">Find My Matches</button><button class="btn" id="deleteProfile">Delete my data</button></div>
     <div class="upload-status" id="profileStatus">Inferred roles are suggestions until you confirm them.</div>
     <details class="evidence"><summary>Why these details were extracted</summary><div id="profileEvidence"></div></details>
   </div>
 
   <details class="advanced">
-    <summary>Preferences & data sources</summary>
+    <summary>Job preferences &amp; data sources</summary>
     <div class="advanced-grid">
       <div class="box">
-        <div class="label">Explicit preferences</div>
+        <div class="label">Job preferences</div><div class="hint">Set your location, experience limit and other requirements for future matches.</div>
         <div class="chips" id="activePrefs" style="margin:0 0 8px"></div>
         <textarea id="prefs" placeholder="e.g. India only, avoid unpaid roles, max 1 year experience"></textarea>
-        <div class="row"><button class="btn primary" id="savePrefs">Save preferences</button><button class="btn" id="resetPrefs" type="button">Reset preferences</button></div>
+        <div class="row"><button class="btn primary" id="savePrefs">Save &amp; Update Matches</button><button class="btn" id="resetPrefs" type="button">Reset preferences</button></div>
         <div class="status" id="prefStatus"></div>
       </div>
       <div class="box" id="sourceAdmin" hidden>
@@ -133,7 +149,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
     </div>
   </details>
 
-</aside><section class="workspace-main" aria-label="Job search"><div class="eyebrow">Explore opportunities</div><div class="search-panel"><div class="searchbar"><textarea id="query" aria-label="Describe the jobs you want" placeholder="Find AI engineering roles in India. If suitable matches are limited, explore junior backend roles."></textarea><div class="search-actions"><small>Search with your saved preferences</small><button class="searchbtn" id="searchBtn">Find jobs →</button></div></div>
+</aside><section class="workspace-main" aria-label="Job search"><div class="eyebrow">Explore opportunities</div><div class="search-panel"><div class="searchbar"><textarea id="query" aria-label="Describe the jobs you want" placeholder="Optional: describe a specific job search, or leave blank for personalized matches."></textarea><div class="search-actions"><small>Leave blank to match your confirmed profile and saved preferences.</small><button class="searchbtn" id="searchBtn">Find jobs →</button></div></div>
   <div class="quick">
     <button data-q="AI/ML roles in India">AI/ML India</button>
     <button data-q="backend roles in India">Backend India</button>
@@ -199,7 +215,7 @@ async function connect(token=''){
   }
 }
 
-let hasProfile=false,lastSearchQuery='',discoverySubmitting=false,discoveryPollToken=0,discoveryPollTimer=null,activeDiscoveryId=null;
+let hasProfile=false,hasSavedPreferences=false,lastSearchQuery='',discoverySubmitting=false,discoveryPollToken=0,discoveryPollTimer=null,activeDiscoveryId=null;
 const refreshedDiscoveryIds=new Set();
 const $=id=>document.getElementById(id);
 function stopDiscoveryPolling(){
@@ -221,6 +237,7 @@ function resetWorkspace(message='Upload a resume for recommendations, or search 
   resetDiscoveryBar();
   searchRequest++;searchRunning=false;$('searchBtn').disabled=false;
   activeProfile=null;hasProfile=false;
+  unrestrictedCountry=false;unrestrictedExperience=false;onboardingDirty=false;
   $('profileChips').replaceChildren();$('profileEvidence').replaceChildren();
   $('targetRoles').value='';$('profileSkills').value='';$('prefs').value='';$('prefStatus').textContent='';
   renderPreferences(null);
@@ -257,6 +274,7 @@ const statusLabel=s=>({recommended:'Recommended',alternative:'Alternative',needs
 function renderPreferences(prefs){
   const el=$('activePrefs'),resetBtn=$('resetPrefs');
   if(!el)return;
+  syncOnboarding(prefs);
   const chips=[];
   if(prefs&&typeof prefs==='object'){
     for(const r of (prefs.roles||[]))chips.push('<span class="chip role">Role: '+esc(r)+'</span>');
@@ -269,6 +287,7 @@ function renderPreferences(prefs){
     if(prefs.paid_only)chips.push('<span class="chip">Paid only</span>');
     for(const a of (prefs.avoid_terms||[]))chips.push('<span class="chip">Avoid: '+esc(a)+'</span>');
   }
+  hasSavedPreferences=!!(prefs && (chips.length || (prefs.prefer_terms||[]).length));
   if(chips.length){
     el.innerHTML=chips.join('');
     const adv=document.querySelector('details.advanced');if(adv)adv.open=true;
@@ -289,6 +308,52 @@ function renderActivity(d){
 const matchBand=score=>score>=.65?'Strong match':score>=.35?'Good match':'Explore';
 const seenLabel=value=>value?'indexed '+new Date(value).toLocaleDateString(undefined,{month:'short',day:'numeric'}):'';
 let activeProfile=null;
+let onboardingPrefs=null, unrestrictedCountry=false, unrestrictedExperience=false, onboardingDirty=false;
+function setOnboardingOption(id,value,label){
+  const el=$(id);
+  for(const opt of [...el.options])if(opt.dataset.saved==='true')opt.remove();
+  if(value && ![...el.options].some(opt=>opt.value===value)){
+    const opt=new Option(label||value,value);opt.dataset.saved='true';el.add(opt);
+  }
+  el.value=value;
+}
+function syncOnboarding(prefs){
+  onboardingPrefs=prefs||null;
+  const countries=prefs?.countries||[];
+  const cap=prefs?.max_required_experience_years;
+  if(countries.length)unrestrictedCountry=false;
+  if(cap!=null)unrestrictedExperience=false;
+  setOnboardingOption('onboardCountry',countries.length>1?'saved-countries':countries[0]||(unrestrictedCountry?'worldwide':''),countries.join(', '));
+  setOnboardingOption('onboardExperience',cap!=null?String(cap):(unrestrictedExperience?'unlimited':''),cap!=null?'Up to '+cap+' years':'');
+  onboardingDirty=false;
+}
+$('onboardCountry').onchange=$('onboardExperience').onchange=()=>{onboardingDirty=true;};
+function onboardingReady(){return !!($('onboardCountry').value && $('onboardExperience').value && !onboardingDirty);}
+async function saveOnboardingConstraints(currentProfile,version){
+  const country=$('onboardCountry').value,experience=$('onboardExperience').value;
+  if(!country||!experience)throw new Error('Choose a country (or worldwide) and an experience limit (or no limit).');
+  const previous=onboardingPrefs||{}, previousCountries=previous.countries||[];
+  const wantedCountries=country==='saved-countries'?previousCountries:country==='worldwide'?[]:[country];
+  const wantedCap=experience==='unlimited'?null:Number(experience);
+  if(wantedCap!==null&&(!Number.isFinite(wantedCap)||wantedCap<0))throw new Error('Invalid experience limit.');
+  const sameCountries=(a,b)=>JSON.stringify([...a].sort())===JSON.stringify([...b].sort());
+  const clauses=[];
+  if(!sameCountries(previousCountries,wantedCountries))clauses.push(country==='worldwide'?'worldwide':'Jobs in '+country+'.');
+  if((previous.max_required_experience_years??null)!==wantedCap)clauses.push(wantedCap===null?'no experience limit':'maximum '+wantedCap+' years of experience');
+  let prefs=previous;
+  if(clauses.length){
+    const d=await api('/preferences',{profile_id:currentProfile,text:clauses.join('; ')});
+    if(version!==workspaceVersion||currentProfile!==profileId)return false;
+    prefs=d.preferences;
+    if(!prefs||!sameCountries(prefs.countries||[],wantedCountries)||(prefs.max_required_experience_years??null)!==wantedCap){
+      if(prefs)renderPreferences(prefs);
+      throw new Error('Job limits could not be saved as selected. Review Job preferences and try again.');
+    }
+  }
+  unrestrictedCountry=country==='worldwide';unrestrictedExperience=experience==='unlimited';
+  renderPreferences(prefs);
+  return true;
+}
 
 function selectedProfileEvidence(evidence){
   const rows=Array.isArray(evidence)?evidence:[],selected=[];
@@ -315,7 +380,7 @@ function renderProfile(profile){
   $('profileEvidence').innerHTML=selectedProfileEvidence(profile.evidence).map(e=>
     '<div class="evidence-item"><b>'+esc(e.kind)+' · '+esc(e.value)+'</b><br>'+esc(e.snippet)+'</div>'
   ).join('')||'<div class="evidence-item">No evidence snippets available.</div>';
-  $('profileStatus').textContent=profile.reviewed?'Profile confirmed — target roles are explicit constraints.':'Inferred roles are suggestions until you confirm them.';
+  $('profileStatus').textContent=profile.reviewed?'Profile confirmed. Your skills help rank jobs; edit your target roles and job limits whenever needed.':'Review your roles and skills, select country and experience, then Find My Matches.';
 }
 function dedupList(values){
   const seen=new Set(),out=[];
@@ -335,6 +400,8 @@ function render(matches){
   $('results').innerHTML=matches.map(m=>{
     const j=m.job||m,status=m.status||'needs_verification';
     const uniqueReasons=dedupList(m.reasons),uniqueRisks=dedupList(m.risks);
+    const profileSkillSet=new Set((activeProfile?.skills||[]).map(x=>String(x).trim().toLowerCase()));
+    const matchedSkills=dedupList((m.evidence||[]).filter(e=>e&&e.kind==='preferred_term'&&profileSkillSet.has(String(e.value||'').trim().toLowerCase())).map(e=>e.value));
     const uniqueEvidence=dedupList((m.evidence||[]).map(e=>e&&e.detail));
     const reasons=uniqueReasons.map(x=>'<div class="good">'+esc(x)+'</div>').join('')||'<div>Resume/query relevance contributed to this match.</div>';
     const risks=uniqueRisks.map(x=>'<div class="risk">'+esc(x)+'</div>').join('')||'<div>No flagged risks in the returned data.</div>'; const evidence=uniqueEvidence.map(d=>'<p>'+esc(d)+'</p>').join(''); const apply=safeUrl(j.apply_url);
@@ -349,6 +416,7 @@ function render(matches){
         <span class="tag">${esc(j.source_kind||'Indexed')} source</span>
         ${j.last_seen_at?'<span class="tag">'+esc(seenLabel(j.last_seen_at))+'</span>':''}
       </div>
+      ${matchedSkills.length?'<div class="detail"><b>Matched resume skills</b><div class="good">'+esc(matchedSkills.join(', '))+'</div></div>':''}
       <div class="details"><div class="detail"><b>Match information</b>${reasons}</div><div class="detail"><b>Risks / unknowns</b>${risks}</div></div>
       ${evidence?'<details class="source-evidence"><summary>Supporting evidence</summary>'+evidence+'</details>':''}
       <div class="actions">
@@ -385,7 +453,8 @@ async function uploadResume(file){
     if(version!==workspaceVersion||currentProfile!==profileId)return;
     renderProfile(d.profile);
     $('resumeStatus').textContent='Resume ready · '+(d.profile.skills||[]).length+' skills detected · review the profile below';
-    $('searchStatus').textContent='Profile ready. Confirm your details and search when ready.';
+    $('searchStatus').textContent='Resume ready. Review your roles and skills, choose location and experience, then select Find My Matches.';
+    document.querySelector('details.advanced').open=true;
   }catch(e){$('resumeStatus').textContent=e.message}finally{$('chooseResume').disabled=false}
 }
 $('chooseResume').onclick=()=>$('resumeInput').click();
@@ -551,23 +620,38 @@ async function requestDiscovery(){
   }
 }
 $('discoverBtn').onclick=requestDiscovery;
-async function search(){
+async function search(forcePersonalized=false){
   if(searchRunning||!profileId)return;
-  const query=$('query').value.trim();
-  if(!query){$('searchStatus').textContent='Describe the roles you want to find.';return;}
+  if(forcePersonalized!==true && ($('reviewProfile').disabled||$('savePrefs').disabled||$('chooseResume').disabled))return;
+  const query=forcePersonalized===true?'':$('query').value.trim();
+  const personalized=!query;
+  if(personalized&&!hasProfile&&!hasSavedPreferences){$('searchStatus').textContent='Upload a resume, save job preferences, or describe the jobs you want.';return;}
+  if(personalized&&hasProfile&&(!activeProfile?.reviewed||!onboardingReady())){$('searchStatus').textContent='Review your profile and job limits, then select Find My Matches.';return;}
+  if(forcePersonalized===true)$('query').value='';
   stopDiscoveryPolling();
   const b=$('searchBtn'),version=workspaceVersion,currentProfile=profileId,request=++searchRequest;searchRunning=true;b.disabled=true;
-  $('searchStatus').textContent='Searching the index and checking available matches…';
+  $('searchStatus').textContent=personalized?'Finding matches using your profile and saved preferences…':'Searching the index and checking available matches…';
+  if(personalized)resetDiscoveryBar();
   $('agentActivity').hidden=true;
   try{
-    const d=await api('/agent',{profile_id:currentProfile,query,top_k:10});
+    let d;
+    if(personalized){
+      const r=await protectedFetch('/recommendations/'+encodeURIComponent(currentProfile)+'?top_k=10');
+      d=await r.json();
+      if(!r.ok)throw new Error(formatApiError(d,'Personalized search failed'));
+    }else{
+      d=await api('/agent',{profile_id:currentProfile,query,top_k:10});
+    }
     if(version!==workspaceVersion||currentProfile!==profileId)return;
     lastSearchQuery=query;
-    if(d.preferences)renderPreferences(d.preferences);
+    /* Search preferences are per-turn, not durable. Keep saved onboarding limits unchanged. */
     const matches=Array.isArray(d.matches)?d.matches:[];
     render(matches);
     renderActivity(d);
-    $('searchStatus').textContent=d.message||'Search returned '+matches.length+' results.';
+    $('searchStatus').textContent=personalized
+      ?'Personalized matches · '+matches.length+' result(s) · '+(hasProfile?'resume skills and saved preferences':'saved preferences')+'. Type a specific search above to refine or discover more roles.'
+      :d.message||'Search returned '+matches.length+' results.';
+    if(personalized)return;
     const recommendedCount=matches.filter(m=>m.status==='recommended').length;
     if(d.discovery&&typeof d.discovery==='object'){
       await applyDiscoveryState(d.discovery,query,{fromAgent:true});
@@ -589,15 +673,17 @@ $('query').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.pre
 document.querySelectorAll('.quick button').forEach(btn=>btn.onclick=()=>{$('query').value=btn.dataset.q;search()});
 
 $('reviewProfile').onclick=async()=>{
+  if(searchRunning||$('savePrefs').disabled||$('chooseResume').disabled)return;
   const split=id=>$(id).value.split(',').map(x=>x.trim()).filter(Boolean);
   const version=workspaceVersion,currentProfile=profileId;$('reviewProfile').disabled=true;
   try{
+    if(!await saveOnboardingConstraints(currentProfile,version))return;
     const r=await protectedFetch('/candidate-profile/'+encodeURIComponent(currentProfile),{
       method:'PUT',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({target_roles:split('targetRoles'),skills:split('profileSkills'),reviewed:true})
     });
     const d=await r.json();if(!r.ok)throw new Error(formatApiError(d,'Profile update failed'));
-    if(version===workspaceVersion&&currentProfile===profileId)renderProfile(d.profile);
+    if(version===workspaceVersion&&currentProfile===profileId){renderProfile(d.profile);await search(true);}
   }catch(e){if(version===workspaceVersion)$('profileStatus').textContent=e.message}finally{$('reviewProfile').disabled=false}
 };
 $('deleteProfile').onclick=async()=>{
@@ -612,6 +698,7 @@ $('deleteProfile').onclick=async()=>{
 };
 
 $('savePrefs').onclick=async()=>{
+  if(searchRunning||$('reviewProfile').disabled||$('chooseResume').disabled)return;
   const b=$('savePrefs'),version=workspaceVersion,currentProfile=profileId;b.disabled=true;$('prefStatus').textContent='Saving…';
   try{
     const d=await api('/preferences',{profile_id:currentProfile,text:$('prefs').value});
@@ -619,20 +706,26 @@ $('savePrefs').onclick=async()=>{
       renderPreferences(d.preferences);
       $('prefs').value='';
       $('prefStatus').textContent='Preferences saved';
+      if(!hasProfile||(activeProfile?.reviewed&&onboardingReady()))await search(true);
+      else $('searchStatus').textContent='Preferences saved. Review your profile and job limits, then select Find My Matches.';
     }
   }catch(e){if(version===workspaceVersion)$('prefStatus').textContent=e.message}finally{b.disabled=false}
 };
 $('resetPrefs').onclick=async()=>{
-  if(!profileId)return;
+  if(!profileId||searchRunning||$('reviewProfile').disabled||$('savePrefs').disabled)return;
   const b=$('resetPrefs'),version=workspaceVersion,currentProfile=profileId;b.disabled=true;$('prefStatus').textContent='Resetting…';
   try{
     const r=await protectedFetch('/preferences/'+encodeURIComponent(currentProfile),{method:'DELETE'});
     let d={};try{d=await r.json()}catch(_){d={}}
     if(!r.ok)throw new Error(formatApiError(d,'Preference reset failed'));
     if(version===workspaceVersion&&currentProfile===profileId){
+      unrestrictedCountry=false;unrestrictedExperience=false;
       renderPreferences(d.preferences);
       $('prefs').value='';
       $('prefStatus').textContent='Preferences reset';
+      $('searchStatus').textContent='Preferences reset. Choose new job limits or enter a specific search.';
+      resetDiscoveryBar();
+      render([]);
     }
   }catch(e){if(version===workspaceVersion)$('prefStatus').textContent=e.message}finally{b.disabled=false}
 };
@@ -656,7 +749,7 @@ async function restoreProfile(attempt=sessionAttempt,expectedProfile=profileId){
     let pd=null;if(pr&&pr.ok){try{pd=await pr.json()}catch(_){pd=null}}
     if(attempt!==sessionAttempt||expectedProfile!==profileId)return;
     if(pd&&pd.preferences)renderPreferences(pd.preferences);
-    if(r.ok&&d.profile){renderProfile(d.profile);$('searchStatus').textContent='Saved profile loaded. Search when ready.'}
+    if(r.ok&&d.profile){renderProfile(d.profile);$('searchStatus').textContent='Saved profile loaded. Review job limits and select Find My Matches, or enter a specific search.'}
   }catch(_){}
 }
 fetch('/health').then(r=>r.json()).then(d=>{const el=$('health');el.classList.add('ok');el.querySelector('span:last-child').textContent='v'+d.version+' · online'}).catch(()=>{$('health').querySelector('span:last-child').textContent='offline'});

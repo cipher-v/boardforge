@@ -16,7 +16,7 @@ def test_root_serves_resume_first_boardforge_ui():
     assert "Upload your resume" in response.text
     assert 'id="searchBtn"' in response.text
     assert 'id="results"' in response.text
-    assert "Preferences & data sources" in response.text
+    assert "Job preferences" in response.text
     assert "Delete my data" in response.text
     assert "targetRoles" in response.text
     assert "scorePercent" not in response.text
