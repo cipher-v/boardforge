@@ -42,9 +42,20 @@ class JobAgent:
         self.store.save_preferences(profile_id, updated)
         return AgentResult("Preferences updated.", updated.model_dump())
 
+    @staticmethod
+    def _record_sanitized_telemetry(store: StoreProtocol, event_kind: str, payload: dict) -> None:
+        recorder = getattr(store, "record_telemetry_event", None)
+        if not callable(recorder):
+            return
+        try:
+            recorder(event_kind, payload)
+        except Exception:
+            pass
+
     async def search_jobs(
         self, profile_id: str, query: str = "", top_k: int = 10,
         *, deadline_monotonic: float | None = None, original_query: str | None = None,
+        record_telemetry: bool = True,
     ) -> AgentResult:
         if "\x00" in query or "\x00" in profile_id:
             raise ValueError("input must not contain NUL bytes")
@@ -93,6 +104,34 @@ class JobAgent:
             "total": round(emb_cost + ver_cost, 8),
         }
         matches = matches[:top_k]
+        if record_telemetry:
+            self._record_sanitized_telemetry(
+                self.store,
+                "search",
+                {
+                    "endpoint": "search",
+                    "orchestration_mode": "direct_search",
+                    "stopped_reason": "completed",
+                    "tools_executed": [
+                        {
+                            "tool": "search_jobs",
+                            "ok": True,
+                            "duration_ms": retrieval["latency_ms"]["total_search"],
+                            "error": None,
+                        }
+                    ],
+                    "match_count": len(matches),
+                    "recommended_count": sum(m.status == "recommended" for m in matches),
+                    "alternative_count": sum(m.status == "alternative" for m in matches),
+                    "needs_verification_count": sum(m.status == "needs_verification" for m in matches),
+                    "cache_hits": {
+                        "query_embedding": bool(retrieval.get("query_embedding_cache_hit")),
+                        "relevance_verification": int(verification.get("cache_hits", 0) or 0),
+                    },
+                    "latency_ms": retrieval["latency_ms"],
+                    "cost_usd": retrieval["cost_usd"],
+                },
+            )
         return AgentResult(
             f"Found {len(matches)} ranked jobs.",
             {
@@ -189,6 +228,7 @@ class JobAgent:
                     profile_id,
                     planned.arguments.get("query", text),
                     planned.arguments.get("top_k", top_k),
+                    record_telemetry=False,
                 )
                 data.update(result.data)
             else:  # pragma: no cover - planner emits only registered tools

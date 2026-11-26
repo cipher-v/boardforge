@@ -10,6 +10,7 @@ from boardforge.models import Preferences
 
 ROLE_MAP = {
     "ai": "AI/ML",
+    "artificial intelligence": "AI/ML",
     "ai engineer": "AI/ML",
     "ai engineers": "AI/ML",
     "machine learning": "AI/ML",

@@ -4,6 +4,7 @@ import asyncio
 import time
 
 from boardforge.database import StoreProtocol
+from boardforge.quarantine import is_quarantined_source
 from boardforge.sync import sync_url
 
 
@@ -15,7 +16,10 @@ async def sync_due_sources(
     concurrency: int = 4,
 ) -> dict:
     started = time.perf_counter()
-    sources = store.sources_due(interval_seconds=interval_seconds, limit=limit)
+    sources = [
+        s for s in store.sources_due(interval_seconds=interval_seconds, limit=limit)
+        if not is_quarantined_source(s.get("source_kind", ""), s.get("source_key", ""))
+    ]
     semaphore = asyncio.Semaphore(max(1, min(concurrency, 16)))
 
     async def sync_one(source: dict) -> dict:

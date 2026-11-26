@@ -364,6 +364,69 @@ class ToolCallingAgent:
             "conditional_alternatives": [],
         }
 
+    def _record_turn_telemetry(
+        self,
+        *,
+        orchestration_mode: str,
+        stopped_reason: str,
+        iterations: int,
+        provider_calls: int,
+        trace: list[dict[str, Any]],
+        matches: list[dict[str, Any]],
+        tool_results: list[dict[str, Any]],
+        discovery: dict[str, Any] | None,
+        discovery_requested: bool,
+        latency_ms: dict[str, Any],
+        cost_usd: dict[str, Any],
+    ) -> None:
+        recorder = getattr(self.core.store, "record_telemetry_event", None)
+        if not callable(recorder):
+            return
+        qe_hits = 0
+        rv_hits = 0
+        for item in tool_results:
+            ret = (item.get("result") or {}).get("retrieval") or {}
+            if ret.get("query_embedding_cache_hit"):
+                qe_hits += 1
+            ver = ret.get("verification") or ret.get("relevance_verification") or {}
+            rv_hits += int(ver.get("cache_hits", 0) or 0)
+        payload = {
+            "endpoint": "agent",
+            "orchestration_mode": orchestration_mode,
+            "stopped_reason": stopped_reason,
+            "provider": self.provider.provider_name if self.enabled else "none",
+            "model": self.provider.model if self.enabled else "none",
+            "iterations": iterations,
+            "provider_calls": provider_calls,
+            "tools_executed": [
+                {
+                    "tool": str(step.get("tool", "")),
+                    "ok": bool(step.get("ok", True)),
+                    "duration_ms": step.get("duration_ms"),
+                    "error": step.get("error"),
+                }
+                for step in trace
+                if isinstance(step, dict)
+            ],
+            "match_count": len(matches),
+            "recommended_count": sum(m.get("status") == "recommended" for m in matches),
+            "alternative_count": sum(m.get("status") == "alternative" for m in matches),
+            "needs_verification_count": sum(m.get("status") == "needs_verification" for m in matches),
+            "discovery_requested": bool(discovery_requested),
+            "discovery_status": (discovery or {}).get("status"),
+            "discovery_request_id": (discovery or {}).get("request_id"),
+            "cache_hits": {
+                "query_embedding": qe_hits,
+                "relevance_verification": rv_hits,
+            },
+            "latency_ms": latency_ms,
+            "cost_usd": cost_usd,
+        }
+        try:
+            recorder("agent_turn", payload)
+        except Exception:
+            pass
+
     async def run(
         self, profile_id: str, text: str,
         *, top_k: int = 10,
@@ -371,13 +434,29 @@ class ToolCallingAgent:
     ) -> dict:
         bounded_top_k = max(1, min(int(top_k), 50))
         if not self.enabled:
+            det_started = time.perf_counter()
             result = await self.core.handle(profile_id, text, top_k=bounded_top_k)
+            det_ms = round((time.perf_counter() - det_started) * 1000, 2)
             payload = dict(result.data)
             if isinstance(payload.get("trace"), list):
                 payload["trace"] = [
                     {"ok": True, **step} if isinstance(step, dict) and "ok" not in step else step
                     for step in payload["trace"]
                 ]
+            det_ret = payload.get("retrieval") or {}
+            self._record_turn_telemetry(
+                orchestration_mode="deterministic_planner",
+                stopped_reason="completed",
+                iterations=0,
+                provider_calls=0,
+                trace=payload.get("trace") or [],
+                matches=payload.get("matches") or [],
+                tool_results=[{"result": {"retrieval": det_ret}}] if det_ret else [],
+                discovery=None,
+                discovery_requested=False,
+                latency_ms=det_ret.get("latency_ms") or {"total": det_ms},
+                cost_usd=det_ret.get("cost_usd") or {"total": 0.0},
+            )
             return {"mode": "deterministic", "message": result.message, **payload}
 
         state = AgentExecutionState(profile_id=profile_id, user_text=text)
@@ -471,14 +550,35 @@ class ToolCallingAgent:
                 "state": state_snapshot(),
             })
             total_ms = round((time.perf_counter() - started) * 1000, 2)
+            fast_matches = (
+                (state.best_search or state.last_search)["matches"]
+                if (state.best_search or state.last_search) else []
+            )
+            fast_latency = {
+                "context_preload": context_latency_ms,
+                "provider_inference_sum": 0.0,
+                "tool_execution_sum": round(tool_latency_ms, 2),
+                "total": total_ms,
+            }
+            fast_cost = self._cost_breakdown(tool_results, 0.0)
+            self._record_turn_telemetry(
+                orchestration_mode="deterministic_fast_path",
+                stopped_reason=state.stopped_reason,
+                iterations=0,
+                provider_calls=0,
+                trace=state.trace,
+                matches=fast_matches,
+                tool_results=tool_results,
+                discovery=None,
+                discovery_requested=False,
+                latency_ms=fast_latency,
+                cost_usd=fast_cost,
+            )
             return {
                 "mode": "intelligent-agent", "message": self._grounded_message(state),
                 "trace": state.trace, "tool_results": tool_results, "events": events,
                 "discovery": None,
-                "matches": (
-                    (state.best_search or state.last_search)["matches"]
-                    if (state.best_search or state.last_search) else []
-                ),
+                "matches": fast_matches,
                 "agent": {
                     "prompt_version": AGENT_PROMPT_VERSION,
                     "orchestration_mode": "deterministic_fast_path",
@@ -493,13 +593,8 @@ class ToolCallingAgent:
                     ),
                     "provider_failure": None, "token_usage": usage.model_dump(),
                     "estimated_cost_usd": 0.0, "total_latency_ms": total_ms,
-                    "cost_breakdown_usd": self._cost_breakdown(tool_results, 0.0),
-                    "latency_ms": {
-                        "context_preload": context_latency_ms,
-                        "provider_inference_sum": 0.0,
-                        "tool_execution_sum": round(tool_latency_ms, 2),
-                        "total": total_ms,
-                    },
+                    "cost_breakdown_usd": fast_cost,
+                    "latency_ms": fast_latency,
                     "provider_trace": [], "discovery_requested": False,
                     "discovery_request_id": None,
                     "sufficient_results": state.sufficient_results,
@@ -732,16 +827,38 @@ class ToolCallingAgent:
         if not state.stopped_reason:
             state.stopped_reason = "iteration_limit"
         await emit({"type": "turn_stopped", "reason": state.stopped_reason, "state": state_snapshot()})
+        final_total_ms = round((time.perf_counter() - started) * 1000, 2)
+        final_matches = (
+            (state.best_search or state.last_search)["matches"]
+            if (state.best_search or state.last_search) else []
+        )
+        final_latency = {
+            "context_preload": context_latency_ms,
+            "provider_inference_sum": round(provider_latency_ms, 2),
+            "tool_execution_sum": round(tool_latency_ms, 2),
+            "total": final_total_ms,
+        }
+        final_cost = self._cost_breakdown(tool_results, estimated_cost)
+        self._record_turn_telemetry(
+            orchestration_mode="llm_conditional",
+            stopped_reason=state.stopped_reason,
+            iterations=iterations_completed,
+            provider_calls=provider_calls,
+            trace=state.trace,
+            matches=final_matches,
+            tool_results=tool_results,
+            discovery=state.discovery,
+            discovery_requested=state.discovery_requested,
+            latency_ms=final_latency,
+            cost_usd=final_cost,
+        )
         return {
             "mode": "intelligent-agent", "message": self._grounded_message(state),
             "trace": state.trace,
             "tool_results": tool_results,
             "events": events,
             "discovery": state.discovery,
-            "matches": (
-                (state.best_search or state.last_search)["matches"]
-                if (state.best_search or state.last_search) else []
-            ),
+            "matches": final_matches,
             "agent": {
                 "prompt_version": AGENT_PROMPT_VERSION,
                 "orchestration_mode": "llm_conditional",
@@ -757,14 +874,9 @@ class ToolCallingAgent:
                 ),
                 "provider_failure": failure, "token_usage": usage.model_dump(),
                 "estimated_cost_usd": round(estimated_cost, 8),
-                "cost_breakdown_usd": self._cost_breakdown(tool_results, estimated_cost),
-                "total_latency_ms": round((time.perf_counter() - started) * 1000, 2),
-                "latency_ms": {
-                    "context_preload": context_latency_ms,
-                    "provider_inference_sum": round(provider_latency_ms, 2),
-                    "tool_execution_sum": round(tool_latency_ms, 2),
-                    "total": round((time.perf_counter() - started) * 1000, 2),
-                },
+                "cost_breakdown_usd": final_cost,
+                "total_latency_ms": final_total_ms,
+                "latency_ms": final_latency,
                 "provider_trace": provider_trace,
                 "discovery_requested": state.discovery_requested,
                 "discovery_request_id": (state.discovery or {}).get("request_id"),

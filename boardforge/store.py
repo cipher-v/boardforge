@@ -11,6 +11,7 @@ from pathlib import Path
 
 from boardforge.matching import job_text
 from boardforge.models import CandidateProfile, FeedbackRequest, Job, Preferences, SyncSummary
+from boardforge.quarantine import is_quarantined_source
 
 
 SCHEMA = """
@@ -155,6 +156,13 @@ CREATE TABLE IF NOT EXISTS discovered_sources (
   last_synced TEXT,
   last_status TEXT NOT NULL DEFAULT 'discovered',
   PRIMARY KEY(source_kind, source_key)
+);
+
+CREATE TABLE IF NOT EXISTS telemetry_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at TEXT NOT NULL,
+  event_kind TEXT NOT NULL,
+  payload TEXT NOT NULL
 );
 """
 
@@ -379,14 +387,23 @@ class Store:
         parsed = datetime.fromisoformat(raw)
         return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
 
-    def active_jobs(self, *, include_stale: bool = False) -> list[Job]:
+    def active_jobs(
+        self,
+        *,
+        include_stale: bool = False,
+        include_quarantined: bool = False,
+    ) -> list[Job]:
         cutoff = None if include_stale else stale_job_cutoff()
         with self.connect() as connection:
             rows = connection.execute(
-                "SELECT payload,first_seen,last_seen FROM jobs WHERE status='active'"
+                "SELECT source_kind,source_key,payload,first_seen,last_seen FROM jobs WHERE status='active'"
             ).fetchall()
         jobs: list[Job] = []
         for row in rows:
+            if not include_quarantined and is_quarantined_source(
+                row["source_kind"], row["source_key"]
+            ):
+                continue
             first_seen_dt = self._as_utc(row["first_seen"])
             last_seen_dt = self._as_utc(row["last_seen"])
             if cutoff is not None and last_seen_dt < cutoff:
@@ -425,7 +442,8 @@ class Store:
         cutoff = stale_job_cutoff()
         with self.connect() as connection:
             rows = connection.execute(
-                """SELECT j.payload,j.first_seen,j.last_seen,e.content_hash AS embedded_hash
+                """SELECT j.source_kind,j.source_key,j.payload,j.first_seen,j.last_seen,
+                          e.content_hash AS embedded_hash
                    FROM jobs j LEFT JOIN job_embeddings e
                      ON e.stable_id=j.stable_id AND e.model=?
                    WHERE j.status='active' ORDER BY j.last_seen DESC""",
@@ -433,6 +451,8 @@ class Store:
             ).fetchall()
         jobs: list[Job] = []
         for row in rows:
+            if is_quarantined_source(row["source_kind"], row["source_key"]):
+                continue
             first_seen_dt = self._as_utc(row["first_seen"])
             last_seen_dt = self._as_utc(row["last_seen"])
             if cutoff is not None and last_seen_dt < cutoff:
@@ -614,19 +634,24 @@ class Store:
     def embedding_status(self, model: str) -> dict:
         with self.connect() as connection:
             rows = connection.execute(
-                """SELECT j.payload,e.content_hash AS embedded_hash
+                """SELECT j.source_kind,j.source_key,j.payload,e.content_hash AS embedded_hash
                    FROM jobs j LEFT JOIN job_embeddings e
                      ON e.stable_id=j.stable_id AND e.model=?
                    WHERE j.status='active'""",
                 (model,),
             ).fetchall()
-        total = len(rows)
+        visible = [
+            row
+            for row in rows
+            if not is_quarantined_source(row["source_kind"], row["source_key"])
+        ]
+        total = len(visible)
         embedded = sum(
             row["embedded_hash"]
             == hashlib.sha256(
                 job_text(Job.model_validate_json(row["payload"]))[:6000].encode("utf-8")
             ).hexdigest()
-            for row in rows
+            for row in visible
         )
         return {
             "model": model,
@@ -903,6 +928,7 @@ class Store:
     def sources_due(self, *, interval_seconds: int = 3600, limit: int = 25) -> list[dict]:
         cutoff = datetime.now(timezone.utc) - timedelta(seconds=max(60, interval_seconds))
         cutoff_iso = cutoff.isoformat()
+        bounded = max(1, min(limit, 500))
         with self.connect() as connection:
             rows = connection.execute(
                 """SELECT source_kind,source_key,board_url,last_synced,last_status
@@ -914,11 +940,28 @@ class Store:
                        THEN MAX(COALESCE(last_synced,first_discovered), last_discovered)
                      ELSE COALESCE(last_synced,first_discovered)
                    END ASC,
-                   source_kind ASC, source_key ASC
-                   LIMIT ?""",
-                (cutoff_iso, cutoff_iso, max(1, min(limit, 500))),
+                   source_kind ASC, source_key ASC""",
+                (cutoff_iso, cutoff_iso),
             ).fetchall()
-        return [dict(row) for row in rows]
+        return [
+            dict(row)
+            for row in rows
+            if not is_quarantined_source(row["source_kind"], row["source_key"])
+        ][:bounded]
+
+    def record_telemetry_event(self, event_kind: str, payload: dict) -> None:
+        raw = json.dumps(payload, default=str)
+        with self.connect() as connection:
+            connection.execute(
+                "INSERT INTO telemetry_events(created_at,event_kind,payload) VALUES(?,?,?)",
+                (_utcnow(), event_kind, raw),
+            )
+            connection.execute(
+                """DELETE FROM telemetry_events
+                   WHERE id NOT IN (
+                     SELECT id FROM telemetry_events ORDER BY id DESC LIMIT 500
+                   )"""
+            )
 
     def record_feedback(self, request: FeedbackRequest) -> None:
         with self.connect() as connection:

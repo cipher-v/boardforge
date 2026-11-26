@@ -16,6 +16,7 @@ from psycopg_pool import ConnectionPool
 
 from boardforge.enrich import infer_country
 from boardforge.matching import job_text
+from boardforge.quarantine import quarantined_sources
 from boardforge.semantic import POSTGRES_EMBEDDING_DIMENSIONS
 from boardforge.models import CandidateProfile, FeedbackRequest, Job, Preferences, SyncSummary
 from boardforge.store import stale_job_cutoff
@@ -224,17 +225,48 @@ class PostgresStore:
             for row in rows
         ]
 
-    def active_jobs(self, *, include_stale: bool = False) -> list[Job]:
+    @staticmethod
+    def _quarantine_filter_clause(*, alias: str = "j") -> tuple[str, list]:
+        configured = sorted(
+            quarantined_sources(),
+            key=lambda item: (item[0] or "", item[1]),
+        )
+        if not configured:
+            return "", []
+        prefix = f"{alias}." if alias else ""
+        parts: list[str] = []
+        params: list = []
+        for kind, key in configured:
+            if kind:
+                parts.append(f"(lower({prefix}source_kind)=%s AND lower({prefix}source_key)=%s)")
+                params.extend([kind, key])
+            else:
+                parts.append(f"(lower({prefix}source_key)=%s)")
+                params.append(key)
+        return f" AND NOT ({' OR '.join(parts)})", params
+
+    def active_jobs(
+        self,
+        *,
+        include_stale: bool = False,
+        include_quarantined: bool = False,
+    ) -> list[Job]:
         cutoff = None if include_stale else stale_job_cutoff()
+        q_clause, q_params = (
+            ("", []) if include_quarantined else self._quarantine_filter_clause(alias="")
+        )
         with self.connect() as connection:
             if cutoff is None:
                 rows = connection.execute(
                     "SELECT payload,first_seen,last_seen FROM jobs WHERE status='active'"
+                    + q_clause,
+                    tuple(q_params),
                 ).fetchall()
             else:
                 rows = connection.execute(
-                    "SELECT payload,first_seen,last_seen FROM jobs WHERE status='active' AND last_seen>=%s",
-                    (cutoff,),
+                    "SELECT payload,first_seen,last_seen FROM jobs WHERE status='active' AND last_seen>=%s"
+                    + q_clause,
+                    (cutoff, *q_params),
                 ).fetchall()
         return self._jobs(rows)
 
@@ -246,8 +278,12 @@ class PostgresStore:
         countries: list[str] | None = None,
     ) -> list[Job]:
         cutoff = stale_job_cutoff()
+        q_clause, q_params = self._quarantine_filter_clause(alias="j")
         extra_clause = ""
         params: list = [model]
+        if q_clause:
+            extra_clause += q_clause
+            params.extend(q_params)
         if cutoff is not None:
             extra_clause += " AND j.last_seen >= %s"
             params.append(cutoff)
@@ -380,6 +416,10 @@ class PostgresStore:
         if cutoff is not None:
             filters = " AND (j.last_seen >= %s)" + filters
             filter_params = [cutoff, *filter_params]
+        q_clause, q_params = self._quarantine_filter_clause(alias="j")
+        if q_clause:
+            filters = q_clause + filters
+            filter_params = [*q_params, *filter_params]
 
         with self.connect() as connection:
             if not normalized and query_vector is None:
@@ -477,6 +517,10 @@ class PostgresStore:
         if cutoff is not None:
             filters = " AND (j.last_seen >= %s)" + filters
             filter_params = [cutoff, *filter_params]
+        q_clause, q_params = self._quarantine_filter_clause(alias="j")
+        if q_clause:
+            filters = q_clause + filters
+            filter_params = [*q_params, *filter_params]
         if not normalized and query_vector is None:
             sql = (
                 "SELECT j.payload,j.first_seen,j.last_seen FROM jobs j "
@@ -692,6 +736,7 @@ class PostgresStore:
             )
 
     def embedding_status(self, model: str) -> dict:
+        q_clause, q_params = self._quarantine_filter_clause(alias="j")
         with self.connect() as connection:
             row = connection.execute(
                 """SELECT COUNT(*) FILTER (WHERE j.status='active') AS active_jobs,
@@ -700,8 +745,10 @@ class PostgresStore:
                               AND e.content_hash=j.embedding_hash
                           ) AS embedded_jobs
                    FROM jobs j LEFT JOIN job_embeddings e
-                     ON e.stable_id=j.stable_id AND e.model=%s""",
-                (model,),
+                     ON e.stable_id=j.stable_id AND e.model=%s
+                   WHERE TRUE"""
+                + q_clause,
+                (model, *q_params),
             ).fetchone()
         total = row["active_jobs"]
         embedded = row["embedded_jobs"]
@@ -984,12 +1031,15 @@ class PostgresStore:
 
     def sources_due(self, *, interval_seconds: int = 3600, limit: int = 25) -> list[dict]:
         cutoff = _utcnow() - timedelta(seconds=max(60, interval_seconds))
+        q_clause, q_params = self._quarantine_filter_clause(alias="")
         with self.connect() as connection:
             return connection.execute(
                 """SELECT source_kind,source_key,board_url,last_synced,last_status
                    FROM discovered_sources
-                   WHERE (last_status != 'failed' AND (last_synced IS NULL OR last_synced<=%s))
-                      OR (last_status = 'failed' AND last_discovered<=%s)
+                   WHERE ((last_status != 'failed' AND (last_synced IS NULL OR last_synced<=%s))
+                      OR (last_status = 'failed' AND last_discovered<=%s))"""
+                + q_clause
+                + """
                    ORDER BY CASE
                      WHEN last_status = 'failed'
                        THEN GREATEST(COALESCE(last_synced,first_discovered), last_discovered)
@@ -997,5 +1047,20 @@ class PostgresStore:
                    END ASC,
                    source_kind ASC, source_key ASC
                    LIMIT %s""",
-                (cutoff, cutoff, max(1, min(limit, 500))),
+                (cutoff, cutoff, *q_params, max(1, min(limit, 500))),
             ).fetchall()
+
+    def record_telemetry_event(self, event_kind: str, payload: dict) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """INSERT INTO telemetry_events(created_at,event_kind,payload)
+                   VALUES(%s,%s,%s)""",
+                (_utcnow(), event_kind, Jsonb(payload)),
+            )
+            connection.execute(
+                """DELETE FROM telemetry_events
+                   WHERE id < (
+                     SELECT COALESCE(MIN(id), 0)
+                     FROM (SELECT id FROM telemetry_events ORDER BY id DESC LIMIT 500) recent
+                   )"""
+            )

@@ -193,6 +193,39 @@ class AgentToolExecutor:
     @staticmethod
     def _bounded_match(match: dict[str, Any]) -> dict[str, Any]:
         job = match.get("job", {})
+        seen_reasons: set[str] = set()
+        reasons: list[str] = []
+        for val in match.get("reasons", []):
+            s = str(val)[:300]
+            k = " ".join(s.split()).casefold()
+            if k and k not in seen_reasons:
+                seen_reasons.add(k)
+                reasons.append(s)
+                if len(reasons) >= 4:
+                    break
+
+        seen_risks: set[str] = set()
+        risks: list[str] = []
+        for val in match.get("risks", []):
+            s = str(val)[:300]
+            k = " ".join(s.split()).casefold()
+            if k and k not in seen_risks:
+                seen_risks.add(k)
+                risks.append(s)
+                if len(risks) >= 4:
+                    break
+
+        seen_ev: set[str] = set()
+        evidence: list[dict[str, Any]] = []
+        for item in match.get("evidence", []):
+            detail = str(item.get("detail", ""))[:500]
+            k = " ".join(detail.split()).casefold()
+            if k and k not in seen_ev:
+                seen_ev.add(k)
+                evidence.append({"kind": item.get("kind"), "detail": detail})
+                if len(evidence) >= 4:
+                    break
+
         return {
             "stable_id": ":".join(str(job.get(key, "")) for key in (
                 "source_kind", "source_key", "external_id"
@@ -209,15 +242,9 @@ class AgentToolExecutor:
             "source_kind": job.get("source_kind"),
             "status": match.get("status"),
             "score": match.get("score"),
-            "reasons": [str(value)[:300] for value in match.get("reasons", [])[:4]],
-            "risks": [str(value)[:300] for value in match.get("risks", [])[:4]],
-            "evidence": [
-                {
-                    "kind": item.get("kind"),
-                    "detail": str(item.get("detail", ""))[:500],
-                }
-                for item in match.get("evidence", [])[:4]
-            ],
+            "reasons": reasons,
+            "risks": risks,
+            "evidence": evidence,
             "untrusted_source_data": True,
         }
 
@@ -269,10 +296,19 @@ class AgentToolExecutor:
             ))
             result = {"feedback": recorded.data}
         elif name == "search_indexed_jobs":
+            import inspect as _inspect
+
+            search_kwargs: dict[str, Any] = {}
+            try:
+                if "record_telemetry" in _inspect.signature(self.core.search_jobs).parameters:
+                    search_kwargs["record_telemetry"] = False
+            except (TypeError, ValueError):
+                pass
             searched = await self.core.search_jobs(
                 state.profile_id, arguments.query, arguments.top_k,
                 deadline_monotonic=deadline_monotonic,
                 original_query=state.user_text,
+                **search_kwargs,
             )
             matches = searched.data.get("matches", [])
             bounded = [self._bounded_match(match) for match in matches[:10]]
@@ -345,8 +381,12 @@ class AgentToolExecutor:
             state.discovery_requested = queued.get("status") in {"queued", "running"}
             result = {"discovery": queued}
         else:  # synchronize_trusted_source
+            from boardforge.quarantine import is_quarantined_source
+
             if not self.allow_sync:
                 return {"ok": False, "error": "source_sync_disabled_for_evaluation"}
+            if is_quarantined_source(arguments.source_kind, arguments.source_key):
+                return {"ok": False, "error": "source_quarantined"}
             trusted = next((source for source in self.store.discovered_sources()
                 if source["source_kind"] == arguments.source_kind
                 and source["source_key"] == arguments.source_key), None)

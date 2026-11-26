@@ -1216,6 +1216,33 @@ class RelevanceVerifier:
         # Classify the bounded pool before selection. Direct matches move above
         # adjacent alternatives and unresolved matches; irrelevant rows are omitted.
         output = [match for match in matches if match.job.stable_id not in excluded_ids]
+        for match in output:
+            seen_r: set[str] = set()
+            dedup_reasons: list[str] = []
+            for r in match.reasons:
+                rk = " ".join(r.split()).casefold()
+                if rk and rk not in seen_r:
+                    seen_r.add(rk)
+                    dedup_reasons.append(r)
+            match.reasons = dedup_reasons
+
+            seen_k: set[str] = set()
+            dedup_risks: list[str] = []
+            for rk_text in match.risks:
+                kk = " ".join(rk_text.split()).casefold()
+                if kk and kk not in seen_k:
+                    seen_k.add(kk)
+                    dedup_risks.append(rk_text)
+            match.risks = dedup_risks
+
+            seen_ev: set[str] = set()
+            dedup_ev: list[MatchEvidence] = []
+            for ev in match.evidence:
+                ek = " ".join(ev.detail.split()).casefold()
+                if ek and ek not in seen_ev:
+                    seen_ev.add(ek)
+                    dedup_ev.append(ev)
+            match.evidence = dedup_ev
         status_order = {"recommended": 0, "alternative": 1, "needs_verification": 2}
         output.sort(key=lambda match: (
             status_order[match.status], -match.score, match.job.title.casefold()

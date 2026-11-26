@@ -10,6 +10,7 @@ from typing import Any
 
 from boardforge.database import StoreProtocol
 from boardforge.discovery.web import _valid_supported_ats_source
+from boardforge.quarantine import is_quarantined_source
 from boardforge.security import has_sensitive_query
 from boardforge.sync import sync_url
 
@@ -81,6 +82,9 @@ def validate_seed_sources(urls: list[str]) -> dict[str, Any]:
         source = _valid_supported_ats_source(url)
         if source is None:
             rejected.append({"url": url, "reason": "not an official Greenhouse/Lever/Ashby board"})
+            continue
+        if is_quarantined_source(source.kind, source.key):
+            rejected.append({"url": url, "reason": "source is quarantined"})
             continue
         marker = (source.kind, source.key.casefold())
         if marker in seen:
@@ -285,6 +289,14 @@ def register_indexed_sources(
                 "source_key": key,
                 "active_jobs": item["active_jobs"],
                 "reason": "not an official Greenhouse/Lever/Ashby board",
+            })
+            continue
+        if is_quarantined_source(kind, key):
+            skipped_unsupported.append({
+                "source_kind": kind,
+                "source_key": key,
+                "active_jobs": item["active_jobs"],
+                "reason": "source is quarantined",
             })
             continue
 

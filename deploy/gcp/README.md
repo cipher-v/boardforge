@@ -31,6 +31,7 @@ Add `-PublicApi` only when exposing the web UI publicly; when `-PublicApi` is se
 - `BOARDFORGE_ENABLE_INTELLIGENT_AGENT=1` (`BOARDFORGE_AGENT_PROVIDER=vertex`, `gemini-3.8-flash`)
 - `BOARDFORGE_ENABLE_LLM_PREFERENCES=0` (OpenAI-dependent preference extraction stays disabled)
 - `BOARDFORGE_DISCOVERY_DISPATCH_MODE=cloud_run_job` (`BOARDFORGE_MAINTENANCE_JOB=boardforge-maintenance`)
+- `BOARDFORGE_QUARANTINED_SOURCES=lever:jobtwine` (hides quarantined ATS sandbox boards from retrieval, recommendations, discovery, periodic sync, and embedding backfill while preserving stored rows and audit history; override via `-QuarantinedSources`)
 
 Any individual gate can be turned off at deploy time via `-EnableEmbeddings:$false`, `-EnableRelevanceVerifier:$false`, or `-EnableIntelligentAgent:$false`.
 
@@ -50,4 +51,12 @@ You can also run a manual cycle at any time:
 
 ```powershell
 gcloud run jobs execute boardforge-maintenance --region us-central1 --wait
+```
+
+## Read-Only Operational Diagnostics
+
+Inspect recent agent orchestration modes, tool executions, discovery request statuses, cache hits, latency, and token/cost expenditure (with candidate PII and raw queries redacted) using:
+
+```powershell
+python -m boardforge.cli diagnose --limit 5
 ```

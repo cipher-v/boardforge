@@ -30,6 +30,7 @@ from boardforge.preferences import (
     is_explicit_senior_query,
     strip_orchestration_instructions,
 )
+from boardforge.quarantine import is_placeholder_job_title, is_quarantined_source
 from boardforge.resume import apply_candidate_context
 from boardforge.sync import sync_url
 
@@ -639,7 +640,7 @@ def _matches_occupational_intent(
     combined_low = f"{title_low} {snippet_low}"
     clean_q = strip_orchestration_instructions(query).casefold()
 
-    if _NON_VACANCY_HIT_RE.search(combined_low):
+    if _NON_VACANCY_HIT_RE.search(combined_low) or (hit.title.strip() and is_placeholder_job_title(hit.title)):
         return False, -5.0
 
     tech_roles_requested = bool(
@@ -861,6 +862,9 @@ def prioritize_discovery_sources(
         if source is None:
             continue
         marker = (source.kind, source.key.casefold())
+        if is_quarantined_source(source.kind, source.key):
+            board_rejected_low.add(marker)
+            continue
         explicit_board = _is_source_explicitly_requested(source, query)
 
         is_indexed = marker in indexed

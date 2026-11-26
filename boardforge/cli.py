@@ -144,6 +144,12 @@ def main() -> None:
         help="Maintenance interval used to report whether each indexed board is fresh or due.",
     )
 
+    p_diagnose = sub.add_parser(
+        "diagnose",
+        help="Read-only operational summary of orchestration, tools, discovery, caches, latency, and cost (no PII).",
+    )
+    p_diagnose.add_argument("--limit", type=int, default=5)
+
     p_reenrich = sub.add_parser("reenrich-index")
     p_reenrich.add_argument(
         "--apply",
@@ -296,6 +302,12 @@ def main() -> None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
         _print_json({**plan, "execution_status": report["status"], "output": str(output_path)})
+        return
+
+    if args.cmd == "diagnose":
+        from boardforge.diagnostics import run_readonly_diagnostics
+
+        _print_json(run_readonly_diagnostics(limit=args.limit))
         return
 
     if args.cmd == "benchmark":

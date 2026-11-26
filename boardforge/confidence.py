@@ -30,13 +30,14 @@ GENERIC_QUERY_TERMS = {
     "than", "over", "above", "greater", "at", "most", "max", "maximum", "under",
     "below", "up",
     "years", "year", "yrs", "experience", "senior", "staff", "principal",
+    "relevant", "suitable", "related", "matching", "applicable", "appropriate",
 }
 OCCUPATION_TERMS = {
     "engineer", "engineering", "developer", "architect", "manager", "specialist",
     "scientist", "analyst", "consultant", "administrator", "lead", "technical",
 }
 ROLE_TERMS = {
-    "AI/ML": {"ai", "ml", "machine", "learning", "llm", "genai", "generative"},
+    "AI/ML": {"ai", "ml", "machine", "learning", "llm", "genai", "generative", "artificial", "intelligence"},
     "Computer Vision": {"computer", "vision", "perception", "image", "processing"},
     "Backend": {"backend", "back", "end", "server", "side"},
     "Software Engineering": {"software", "engineering", "developer"},
@@ -126,13 +127,15 @@ def occupational_query_text(query: str) -> str:
     cleaned = EXPERIENCE_CAP_RE.sub(" ", cleaned)
     cleaned = _NEGATED_CLAUSE_RE.sub(" ", cleaned)
     for pattern in (
+        r"\b(?:(?:also\s+)?(?:include|including|consider|accept|welcome)|or)\s+"
+        r"(?:any\s+)?(?:relevant\s+|suitable\s+|related\s+|paid\s+)?(?:internships?|intern\s+(?:roles?|positions?|openings?|opportunities))\b",
         r"\b(?:entry[- ]level|early[- ]career|freshers?|new grads?|recent graduates?)\b",
         r"\b(?:(?:i\s+have|i've\s+got)\s+)?(?:for\s+candidates?\s+(?:with|without)\s+)?"
         r"(?:no|zero|without)\s+(?:prior\s+|formal\s+)?(?:employment\s+|work\s+|professional\s+|industry\s+)?experience\b",
         r"\b(?:suitable for|matching|based on)\s+my\s+(?:profile|resume|cv|background)\b",
         r"\b(?:and\s+)?(?:clearly\s+)?flag\s+(?:any\s+)?(?:uncertain|unknown|unverified)\s+eligibility\b",
         r"\b(?:changed\s+my\s+mind|from\s+now\s+on|going\s+forward)\b",
-        r"\b(?:find|search(?:\s+for)?|show(?:\s+me)?|include|explore|look\s+for|list)\b",
+        r"\b(?:find|search(?:\s+for)?|show(?:\s+me)?|include|including|explore|look\s+for|list)\b",
     ):
         cleaned = re.sub(pattern, " ", cleaned)
     # Sentence punctuation and standalone inequality operators are not technical query terms.

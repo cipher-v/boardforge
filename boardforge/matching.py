@@ -24,6 +24,7 @@ from boardforge.preferences import (
     is_entry_level_target,
     strip_orchestration_instructions,
 )
+from boardforge.quarantine import is_placeholder_job_title, is_quarantined_source
 
 
 WORD_RE = re.compile(r"[a-zA-Z0-9+#.]{2,}")
@@ -306,6 +307,11 @@ def hard_violations(job: Job, preferences: Preferences, query: str = "") -> list
     text = job_text(job).lower()
     violations: list[str] = []
 
+    if is_quarantined_source(job.source_kind, job.source_key):
+        violations.append("quarantined_source")
+    if is_placeholder_job_title(job.title):
+        violations.append("placeholder_title")
+
     if preferences.countries:
         allowed = {country.casefold() for country in preferences.countries}
         if not job.country:
@@ -368,6 +374,36 @@ def hard_violations(job: Job, preferences: Preferences, query: str = "") -> list
     return violations
 
 
+def _dedup_strings(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for raw in values:
+        key = " ".join(raw.split()).casefold()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(raw)
+    return out
+
+
+def _dedup_evidence(items: list[MatchEvidence]) -> list[MatchEvidence]:
+    seen_details: set[str] = set()
+    seen_prefer_values: set[str] = set()
+    out: list[MatchEvidence] = []
+    for item in items:
+        detail_key = " ".join(item.detail.split()).casefold()
+        if not detail_key or detail_key in seen_details:
+            continue
+        if item.kind == "preferred_term":
+            val_key = " ".join(item.value.split()).casefold()
+            if val_key in seen_prefer_values:
+                continue
+            seen_prefer_values.add(val_key)
+        seen_details.add(detail_key)
+        out.append(item)
+    return out
+
+
 def evidence(
     job: Job, preferences: Preferences, *, query: str = ""
 ) -> tuple[list[str], list[str], float, list[MatchEvidence]]:
@@ -395,8 +431,13 @@ def evidence(
             detail="job is explicitly marked remote", weight=0.05,
         ))
 
+    seen_prefer: set[str] = set()
     for term in preferences.prefer_terms:
+        norm_term = " ".join(term.split()).casefold()
+        if not norm_term or norm_term in seen_prefer:
+            continue
         if _contains_phrase(text, term):
+            seen_prefer.add(norm_term)
             items.append(MatchEvidence(
                 kind="preferred_term", value=term,
                 detail=f"job contains preferred term '{term}'", weight=0.03,
@@ -444,7 +485,9 @@ def evidence(
 
     if job.remote_policy == "unknown":
         risks.append("remote policy not verified")
-    reasons = [item.detail for item in items]
+    items = _dedup_evidence(items)
+    reasons = _dedup_strings([item.detail for item in items])
+    risks = _dedup_strings(risks)
     return reasons, risks, sum(item.weight for item in items), items
 
 
@@ -514,9 +557,11 @@ def rank_jobs(
         if query.strip():
             assessment = assess_query_relevance(job, preferences, query)
             intent_items = query_evidence_items(assessment)
-            structured_evidence.extend(intent_items)
-            reasons.extend(item.detail for item in intent_items)
-            bonus += sum(item.weight for item in intent_items)
+            for intent_item in intent_items:
+                structured_evidence.append(intent_item)
+            structured_evidence = _dedup_evidence(structured_evidence)
+            reasons = _dedup_strings([*reasons, *(item.detail for item in intent_items)])
+            bonus = sum(item.weight for item in structured_evidence)
         has_direct_role = any(item.kind == "role" for item in structured_evidence)
         has_adjacent_role = any(item.kind == "adjacent_role" for item in structured_evidence)
         if preferences.roles and not has_direct_role and not has_adjacent_role:

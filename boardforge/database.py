@@ -18,7 +18,9 @@ class StoreProtocol(Protocol):
         *,
         allow_verified_empty: bool = False,
     ) -> SyncSummary: ...
-    def active_jobs(self, *, include_stale: bool = False) -> list[Job]: ...
+    def active_jobs(
+        self, *, include_stale: bool = False, include_quarantined: bool = False,
+    ) -> list[Job]: ...
     def candidate_jobs(
         self,
         query: str,

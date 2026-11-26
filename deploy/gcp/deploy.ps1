@@ -17,6 +17,7 @@ param(
     [string] $MaintenanceTimeZone = "Etc/UTC",
     [string] $SchedulerJobName = "",
     [int] $StaleJobMaxAgeDays = 30,
+    [string] $QuarantinedSources = "lever:jobtwine",
     [switch] $PublicApi
 )
 
@@ -54,6 +55,7 @@ $workerRuntimeEnv = @(
     "BOARDFORGE_SOURCE_SYNC_LIMIT=10",
     "BOARDFORGE_SOURCE_SYNC_CONCURRENCY=4",
     "BOARDFORGE_STALE_JOB_MAX_AGE_DAYS=$StaleJobMaxAgeDays",
+    "BOARDFORGE_QUARANTINED_SOURCES=$QuarantinedSources",
     "BOARDFORGE_ENABLE_EMBEDDINGS=$embeddingsFlag",
     "BOARDFORGE_EMBEDDING_PROVIDER=vertex",
     "BOARDFORGE_EMBEDDING_MODEL=gemini-embedding-001",
