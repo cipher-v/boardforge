@@ -554,7 +554,10 @@ async def hybrid_rank_jobs(
     rescored.sort(
         key=lambda match: (
             bool(match.hard_violations),
-            status_order.get(match.status, 2),
+            (1 if match.status == "needs_verification" and any(
+                item.kind == "role" and item.detail.startswith("title matched")
+                for item in match.evidence
+            ) else status_order.get(match.status, 2) + (match.status != "recommended")),
             (entry_level_target and bool(SENIORITY_TITLE_RE.search(match.job.title))),
             (
                 prefs.max_required_experience_years is not None

@@ -337,6 +337,28 @@ class ToolCallingAgent:
             text, re.I,
         ))
 
+
+    @classmethod
+    def _explicit_discovery_condition(cls, text: str) -> tuple[str, int] | None:
+        match = re.fullmatch(
+            r"(?P<search>.+?)[.;]\s*if\s+(?:fewer|less)\s+than\s+"
+            r"(?P<number>[1-9]|10|one|two|three|four|five|six|seven|eight|nine|ten)\s+"
+            r"(?:suitable|verified)\s+(?:opportunities|recommendations|matches|jobs|roles)"
+            r"(?:\s+(?:exist|are\s+found|are\s+available))?\s*,\s*"
+            r"(?:please\s+)?discover\s+(?:additional|more|new)\s+(?:job\s+)?(?:sources|boards)"
+            r"(?:\s+while\s+(?:preserving|keeping|respecting|maintaining)\s+"
+            r"(?:my\s+)?(?:location\s+and\s+experience\s+)?constraints)?[.!]?\s*",
+            text.strip(), re.I | re.S,
+        )
+        if not match:
+            return None
+        search = match.group("search").strip()
+        if not cls._is_straightforward_search(search) or not 1 <= len(search) <= 500:
+            return None
+        words = dict(zip("one two three four five six seven eight nine ten".split(), range(1, 11)))
+        raw = match.group("number").lower()
+        return search, int(raw) if raw.isdigit() else words[raw]
+
     def _preloaded_context(self, profile_id: str) -> dict[str, Any]:
         profile = self.core.store.load_candidate_profile(profile_id)
         preferences = self.core.store.load_preferences(profile_id)
@@ -433,7 +455,8 @@ class ToolCallingAgent:
         event_sink: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None,
     ) -> dict:
         bounded_top_k = max(1, min(int(top_k), 50))
-        if not self.enabled:
+        condition = self._explicit_discovery_condition(text)
+        if not self.enabled and condition is None:
             det_started = time.perf_counter()
             result = await self.core.handle(profile_id, text, top_k=bounded_top_k)
             det_ms = round((time.perf_counter() - det_started) * 1000, 2)
@@ -460,6 +483,8 @@ class ToolCallingAgent:
             return {"mode": "deterministic", "message": result.message, **payload}
 
         state = AgentExecutionState(profile_id=profile_id, user_text=text)
+        if condition is not None:
+            state.requested_recommendation_threshold = condition[1]
         events: list[dict[str, Any]] = []
 
         async def emit(event: dict[str, Any]) -> None:
@@ -506,8 +531,10 @@ class ToolCallingAgent:
             "state": state_snapshot(),
         })
 
-        if self._is_straightforward_search(text):
-            arguments = self._fast_search_arguments(text, authenticated_context)
+        if condition is not None or self._is_straightforward_search(text):
+            fast_mode = "deterministic_conditional" if condition else "deterministic_fast_path"
+            search_text = condition[0] if condition else text
+            arguments = self._fast_search_arguments(search_text, authenticated_context)
             await emit({
                 "type": "deterministic_fast_path", "tool": "search_indexed_jobs",
                 "arguments": arguments, "state": state_snapshot(),
@@ -541,6 +568,48 @@ class ToolCallingAgent:
                 "result": result, "state_before": before_tool,
                 "state_after": state_snapshot(),
             })
+            if (condition is not None and result.get("ok") and state.searches
+                    and not state.sufficient_results
+                    and state.stopped_reason == "no_verified_recommendations"
+                    and not result.get("verification_quota_denied")):
+                remaining = deadline - time.perf_counter()
+                if attempted_tools >= self.max_tool_calls:
+                    state.stopped_reason = "tool_call_limit"
+                elif remaining <= 0:
+                    state.stopped_reason = "total_timeout"
+                else:
+                    attempted_tools += 1
+                    discovery_args = {
+                        "query": search_text,
+                        "reason": f"Fewer than {condition[1]} verified recommendations in index",
+                    }
+                    before_discovery = state_snapshot()
+                    discovery_started = time.perf_counter()
+                    try:
+                        discovery_result = await asyncio.wait_for(
+                            self.executor.execute(state, "discover_job_sources", discovery_args,
+                                                  deadline_monotonic=deadline),
+                            timeout=min(self.timeout_seconds, remaining),
+                        )
+                    except asyncio.TimeoutError:
+                        discovery_result = {"ok": False, "error": "tool_timeout"}
+                        state.stopped_reason = "tool_timeout"
+                    duration = round((time.perf_counter() - discovery_started) * 1000, 2)
+                    tool_latency_ms += duration
+                    state.trace.append({
+                        "iteration": 0, "tool": "discover_job_sources", "arguments": discovery_args,
+                        "ok": discovery_result.get("ok", False),
+                        "error": discovery_result.get("error"), "duration_ms": duration,
+                    })
+                    tool_results.append({"tool": "discover_job_sources", "result": discovery_result})
+                    if state.discovery_requested:
+                        state.stopped_reason = "discovery_queued"
+                    await emit({
+                        "type": "tool_executed", "iteration": 0,
+                        "tool": "discover_job_sources", "arguments": discovery_args,
+                        "result": discovery_result, "state_before": before_discovery,
+                        "state_after": state_snapshot(),
+                    })
             await emit({
                 "type": "stop_condition", "reason": state.stopped_reason,
                 "state": state_snapshot(),
@@ -562,26 +631,26 @@ class ToolCallingAgent:
             }
             fast_cost = self._cost_breakdown(tool_results, 0.0)
             self._record_turn_telemetry(
-                orchestration_mode="deterministic_fast_path",
+                orchestration_mode=fast_mode,
                 stopped_reason=state.stopped_reason,
                 iterations=0,
                 provider_calls=0,
                 trace=state.trace,
                 matches=fast_matches,
                 tool_results=tool_results,
-                discovery=None,
-                discovery_requested=False,
+                discovery=state.discovery,
+                discovery_requested=state.discovery_requested,
                 latency_ms=fast_latency,
                 cost_usd=fast_cost,
             )
             return {
                 "mode": "intelligent-agent", "message": self._grounded_message(state),
                 "trace": state.trace, "tool_results": tool_results, "events": events,
-                "discovery": None,
+                "discovery": state.discovery,
                 "matches": fast_matches,
                 "agent": {
                     "prompt_version": AGENT_PROMPT_VERSION,
-                    "orchestration_mode": "deterministic_fast_path",
+                    "orchestration_mode": fast_mode,
                     "provider": self.provider.provider_name, "model": self.provider.model,
                     "iterations": 0, "provider_calls": 0,
                     "attempted_tool_calls": attempted_tools,
@@ -595,8 +664,8 @@ class ToolCallingAgent:
                     "estimated_cost_usd": 0.0, "total_latency_ms": total_ms,
                     "cost_breakdown_usd": fast_cost,
                     "latency_ms": fast_latency,
-                    "provider_trace": [], "discovery_requested": False,
-                    "discovery_request_id": None,
+                    "provider_trace": [], "discovery_requested": state.discovery_requested,
+                    "discovery_request_id": (state.discovery or {}).get("request_id"),
                     "sufficient_results": state.sufficient_results,
                 },
             }

@@ -342,9 +342,9 @@ def test_occupational_relevance_vs_candidate_eligibility_and_fresher_evidence():
     assert by_id["cv-unk"].status == "needs_verification"
     assert "experience requirement not verified" in by_id["cv-unk"].risks
 
-    # Ordering: recommended -> alternative -> needs_verification
+    # Ordering: recommended -> needs_verification -> alternative
     statuses = [m.status for m in ranked]
-    assert statuses == ["recommended", "alternative", "alternative", "needs_verification"]
+    assert statuses == ["recommended", "needs_verification", "alternative", "alternative"]
 
 
 def test_aiprise_software_engineer_i_verifier_accepts_substantive_bullet_segments(tmp_path: Path):

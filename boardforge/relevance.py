@@ -1243,7 +1243,7 @@ class RelevanceVerifier:
                     seen_ev.add(ek)
                     dedup_ev.append(ev)
             match.evidence = dedup_ev
-        status_order = {"recommended": 0, "alternative": 1, "needs_verification": 2}
+        status_order = {"recommended": 0, "needs_verification": 1, "alternative": 2}
         output.sort(key=lambda match: (
             status_order[match.status], -match.score, match.job.title.casefold()
         ))

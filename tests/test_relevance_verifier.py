@@ -300,9 +300,10 @@ def test_missing_candidate_and_malformed_output_fail_closed(tmp_path: Path):
     verified, _ = run(
         RelevanceVerifier(store, provider, enabled=True), [match(first), match(second)]
     )
-    assert verified[0].status == "alternative"
-    assert verified[1].status == "needs_verification"
-    assert "omitted candidate" in verified[1].risks[0]
+    by_id = {m.job.stable_id: m for m in verified}
+    assert by_id[first.stable_id].status == "alternative"
+    assert by_id[second.stable_id].status == "needs_verification"
+    assert "omitted candidate" in by_id[second.stable_id].risks[0]
 
     malformed = MockProvider([{"not_judgments": []}])
     failed, meta = run(

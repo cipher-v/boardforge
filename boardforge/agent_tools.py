@@ -116,6 +116,7 @@ class AgentExecutionState:
     last_search: dict[str, Any] | None = None
     best_search: dict[str, Any] | None = None
     discovery: dict[str, Any] | None = None
+    requested_recommendation_threshold: int | None = None
 
 
 Syncer = Callable[[str, Any], Awaitable[Any]]
@@ -318,7 +319,8 @@ class AgentToolExecutor:
                 item["status"] == "recommended" for item in bounded
             )
             state.sufficient_results = (
-                state.recommended_count >= self.min_sufficient_results
+                state.recommended_count >= (state.requested_recommendation_threshold
+                                            or self.min_sufficient_results)
             )
             result = {
                 "matches": bounded,

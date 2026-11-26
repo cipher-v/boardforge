@@ -52,6 +52,7 @@ ROLE_PATTERNS: dict[str, tuple[str, ...]] = {
     "Software Engineering": (
         r"\bsoftware engineer\b", r"\bsoftware developer\b",
         r"\bapplication developer\b", r"\bfull[- ]stack\b",
+        r"\bsde\b", r"\bsoftware development engineer\b",
     ),
     "Data Engineering": (
         r"\bdata engineer\b", r"\bdata engineering\b",
@@ -286,6 +287,39 @@ def role_evidence(job: Job, role: str, *, query: str = "") -> MatchEvidence | No
             return None
         if not re.search(r"\bback[- ]?end\b", title, re.I) and _FRONTEND_FOCUSED_TITLE_RE.search(title):
             return None
+    # Research engineering and model evaluation can be core ML work even
+    # when the title does not contain the literal phrase "ML engineer".
+    # Require both a specific technical title and substantive responsibilities.
+    if role == "AI/ML":
+        description = job.description
+        research_title = re.search(
+            r"\bresearch engineering\b|\b(?:ai|ml|llm|model) evaluations? (?:engineer|engineering|intern)\b",
+            title, re.I,
+        )
+        technical_work = re.search(
+            r"\b(?:model inference|model training|model evaluation|evaluation pipelines?|"
+            r"automated judges|train(?:ing)? (?:ml |ai )?models?)\b", description, re.I,
+        )
+        technical_skill = re.search(
+            r"\b(?:python|pytorch|tensorflow|machine learning|llms?|modern ml)\b", description, re.I,
+        )
+        if research_title and technical_work and technical_skill:
+            return MatchEvidence(
+                kind="role", value=role,
+                detail=f"description substantiated AI/ML work via '{technical_work.group(0)}'",
+                weight=0.10,
+            )
+        if re.search(r"\b(?:data scientist|data science)\b", title, re.I):
+            modeling = re.search(
+                r"\b(?:ml (?:concepts|models|algorithms)|machine learning|statistical model(?:s|ing|ling)?|"
+                r"develop(?:ing)? models|predictive model(?:s|ing|ling)?)\b", description, re.I,
+            )
+            if modeling and technical_skill:
+                return MatchEvidence(
+                    kind="adjacent_role", value=role,
+                    detail=f"adjacent data science role with ML evidence ('{modeling.group(0)}')",
+                    weight=0.09,
+                )
     patterns = ROLE_PATTERNS.get(role)
     if patterns:
         for pattern in patterns:
@@ -650,7 +684,10 @@ def rank_jobs(
     status_order = {"recommended": 0, "alternative": 1, "needs_verification": 2}
     matches.sort(
         key=lambda match: (
-            status_order.get(match.status, 2),
+            (1 if match.status == "needs_verification" and any(
+                item.kind == "role" and item.detail.startswith("title matched")
+                for item in match.evidence
+            ) else status_order.get(match.status, 2) + (match.status != "recommended")),
             (entry_level_target and bool(SENIORITY_TITLE_RE.search(match.job.title))),
             (
                 preferences.max_required_experience_years is not None
