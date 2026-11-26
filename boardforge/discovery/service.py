@@ -12,6 +12,7 @@ import httpx
 from boardforge.database import StoreProtocol
 from boardforge.discovery.web import SearchProvider, create_search_provider, discover_and_sync
 from boardforge.models import CandidateProfile, Preferences
+from boardforge.preferences import effective_search_preferences
 
 
 _LOCAL_DRAIN_RUNNING: set[int] = set()
@@ -27,11 +28,17 @@ def discovery_fingerprint(
     *,
     profile_id: str = "",
 ) -> str:
+    effective = (
+        effective_search_preferences(preferences, query)
+        if query.strip()
+        else preferences
+    )
     payload = {
         "query": " ".join(query.casefold().split()),
-        "roles": preferences.roles or profile.target_roles or profile.role_signals,
-        "locations": preferences.locations,
-        "countries": preferences.countries,
+        "roles": effective.roles or profile.target_roles or profile.role_signals,
+        "locations": effective.locations,
+        "countries": effective.countries,
+        "max_exp": effective.max_required_experience_years,
         "profile_id": profile_id,
     }
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
@@ -73,6 +80,7 @@ async def run_discovery_request(
     preferences: Preferences,
     *,
     query: str = "",
+    profile_id: str = "",
     client: SearchProvider | None = None,
     claimed: bool = False,
 ) -> None:
@@ -84,6 +92,7 @@ async def run_discovery_request(
             profile,
             preferences,
             query=query,
+            profile_id=profile_id,
             client=client,
         )
         if report.failures and report.synced_boards == 0:
@@ -120,6 +129,7 @@ async def run_pending_discoveries(
             profile,
             preferences,
             query=item["query"],
+            profile_id=item["profile_id"],
             client=client,
             claimed=True,
         )

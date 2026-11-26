@@ -439,22 +439,31 @@ async function applyDiscoveryState(rec,targetQuery,opts={}){
     stopDiscoveryPolling();
     const rep=rec.report||{};
     const boards=Number(rep.synced_boards||0),fetched=Number(rep.jobs_fetched||0);
+    const hasInserted=rep.jobs_inserted!==undefined&&rep.jobs_inserted!==null;
+    const hasMatching=rep.new_matching_jobs!==undefined&&rep.new_matching_jobs!==null;
+    let metrics=boards+' board(s) synced, '+fetched+' job(s) fetched';
+    if(hasInserted)metrics+=', '+Number(rep.jobs_inserted)+' newly indexed';
+    if(hasMatching)metrics+=', '+Number(rep.new_matching_jobs)+' matching surfaced';
     btn.disabled=true;
+    if(boards===0&&!rec.cached){
+      st.textContent='Discovery completed · 0 new boards synced'+(rep.reason?' ('+rep.reason+').':'.');
+      return;
+    }
     if(rec.cached&&opts.fromDirectSubmit){
       if(Array.isArray(opts.initialMatches)&&opts.initialMatches.length)render(opts.initialMatches);
-      st.textContent='Recent discovery reused · '+boards+' board(s) synced, '+fetched+' job(s) checked.';
+      st.textContent='Recent discovery reused · '+metrics+'.';
       return;
     }
     const alreadyRefreshed=reqId!=null&&refreshedDiscoveryIds.has(reqId);
     if(!alreadyRefreshed&&targetQuery){
       if(reqId!=null)refreshedDiscoveryIds.add(reqId);
-      st.textContent='Discovery completed · '+boards+' board(s) synced, '+fetched+' job(s) fetched · refreshing results…';
+      st.textContent='Discovery completed · '+metrics+' · refreshing results…';
       const updated=await refreshSearchAfterDiscovery(targetQuery,profileId,workspaceVersion);
       if(st&&profileId){
-        st.textContent='Discovery completed · '+boards+' board(s) synced, '+fetched+' job(s) fetched'+(updated?' · results refreshed.':'.');
+        st.textContent='Discovery completed · '+metrics+(updated?' · results refreshed.':'.');
       }
     }else{
-      st.textContent='Discovery completed · '+boards+' board(s) synced, '+fetched+' job(s) fetched.';
+      st.textContent='Discovery completed · '+metrics+'.';
     }
     return;
   }
