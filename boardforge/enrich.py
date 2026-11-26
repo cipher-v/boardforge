@@ -226,6 +226,315 @@ def infer_remote_policy(location: str, title: str, description: str) -> RemotePo
     return "unknown"
 
 
+_EXP_NUMBER_WORDS = {
+    "zero": 0.0,
+    "one": 1.0,
+    "two": 2.0,
+    "three": 3.0,
+    "four": 4.0,
+    "five": 5.0,
+    "six": 6.0,
+    "seven": 7.0,
+    "eight": 8.0,
+    "nine": 9.0,
+    "ten": 10.0,
+    "eleven": 11.0,
+    "twelve": 12.0,
+    "thirteen": 13.0,
+    "fourteen": 14.0,
+    "fifteen": 15.0,
+    "sixteen": 16.0,
+    "seventeen": 17.0,
+    "eighteen": 18.0,
+    "nineteen": 19.0,
+    "twenty": 20.0,
+}
+_EXP_WORD_ALT = "|".join(sorted(_EXP_NUMBER_WORDS, key=len, reverse=True))
+_EXP_NUM_TOKEN = (
+    rf"(?:\d+(?:\.\d+)?|(?:{_EXP_WORD_ALT})(?:\s*\(\s*\d+(?:\.\d+)?\s*\))?)"
+)
+
+_INLINE_SECTION_BREAK_RE = re.compile(
+    r"(?<!\n)(?=(?:\*+\s*)?\b(?:"
+    r"required\s+skills\s+(?:&|and)\s+experience|"
+    r"required\s+qualifications|minimum\s+qualifications|basic\s+qualifications|"
+    r"mandatory\s+qualifications|specific\s+requirements|"
+    r"what\s+we(?:'re|’re|\s+are)?\s+looking\s+for|"
+    r"what\s+we\s+look\s+for(?:\s+in\s+you)?|"
+    r"what\s+you(?:'ll|’ll|\s+will)?\s+(?:bring|need)|"
+    r"preferred\s+(?:qualifications|skills|experience)|"
+    r"desired\s+(?:qualifications|skills|experience)|"
+    r"nice[- ]to[- ]haves?|good[- ]to[- ]haves?|"
+    r"bonus\s+points(?:\s+for)?|"
+    r"(?:required|desired|preferred|must[- ]haves?|requirements)\s*:|"
+    r"(?<!preferred\s)(?<!desired\s)(?<!optional\s)(?<!additional\s)"
+    r"(?<!required\s)(?<!minimum\s)(?<!basic\s)(?<!mandatory\s)qualifications\s*:"
+    r"))",
+    re.I,
+)
+_REQUIRED_HEADING_RE = re.compile(
+    r"^\s*[\*\#\-\•\·\s]*(?:"
+    r"requirements?|required(?:\s+skills(?:\s+(?:&|and)\s+experience)?)?(?:\s+qualifications)?|"
+    r"minimum\s+qualifications|basic\s+qualifications|mandatory\s+qualifications|"
+    r"specific\s+requirements|must[- ]haves?|"
+    r"what\s+we(?:'re|’re|\s+are)?\s+looking\s+for|"
+    r"what\s+we\s+look\s+for(?:\s+in\s+you)?(?:\s*\([^)]*\))?|"
+    r"what\s+you(?:'ll|’ll|\s+will)?\s+(?:bring|need)|"
+    r"who\s+you\s+are|skills\s*(?:&|and)\s*experience|"
+    r"experience\s*(?:&|and)\s*qualifications|qualifications"
+    r")(?:\s*:|\s*$)",
+    re.I,
+)
+_PREFERRED_HEADING_RE = re.compile(
+    r"^\s*[\*\#\-\•\·\s]*(?:"
+    r"preferred(?:\s+qualifications|\s+skills|\s+experience)?|"
+    r"nice[- ]to[- ]haves?|good[- ]to[- ]haves?|"
+    r"desired(?:\s+qualifications|\s+skills|\s+experience)?|"
+    r"bonus(?:\s+points(?:\s+for)?)?|pluses|optional(?:\s+qualifications)?|"
+    r"additional\s+qualifications"
+    r")(?:\s*:|\s*$)",
+    re.I,
+)
+_IGNORED_HEADING_RE = re.compile(
+    r"^\s*[\*\#\-\•\·\s]*(?:"
+    r"about\s+(?:us|the\s+company|the\s+interview|[a-z0-9]+)|"
+    r"why\s+(?:join\s+us|[a-z0-9]+)|benefits|compensation(?:\s*(?:&|and)\s*benefits)?|"
+    r"what\s+you(?:'ll|’ll|\s+will)?\s+do|responsibilities|role\s+overview"
+    r")(?:\s*:|\s*$)",
+    re.I,
+)
+_OPTIONAL_PREFIX_RE = re.compile(
+    r"(?:(?:\b(?:preferred|desired|optional|nice[- ]to[- ]have|good[- ]to[- ]have|bonus|plus)\s*[:\-–]\s*)|"
+    r"(?:\b(?:ideally|preferably|typically)(?:\s+have|\s+with)?[,:\s]*))$",
+    re.I,
+)
+_OPTIONAL_DIRECT_SUFFIX_RE = re.compile(
+    r"^(?:\s+(?:of\s+)?(?:[a-z0-9/+,&'’-]+\s+){0,6}?(?:"
+    r"is\s+(?:a\s+)?(?:plus|bonus|preferred|nice[- ]to[- ]have)|"
+    r"preferred(?=\s*(?:[.,;)]|$))|"
+    r"\(not\s+required[^)]*\)|not\s+required\b))",
+    re.I,
+)
+_NEGATED_EXP_PREFIX_RE = re.compile(
+    r"\b(?:don['’]?t\s+care\s+about|do\s+not\s+care\s+about|no\s+need\s+for|"
+    r"not\s+requiring|without\s+requiring)\s*$",
+    re.I,
+)
+_COMPANY_BOILERPLATE_PREFIX_RE = re.compile(
+    r"\b(?:founded|established|for\s+over|over\s+the\s+(?:next|past|last)|"
+    r"in\s+the\s+(?:next|past|last)|for\s+the\s+(?:next|past|last)|"
+    r"within\s+(?:the\s+)?first|in\s+your\s+first|over\s+your\s+first|"
+    r"by\s+end\s+of\s+year|we\s+have\s+over|our\s+team\s+brings|"
+    r"doing\s+this\s+work\s+for|backed\s+by|serving\s+customers\s+for)\s*$",
+    re.I,
+)
+_NON_EXPERIENCE_SUFFIX_RE = re.compile(
+    r"^\s*(?:ago\b|old\b|of\s+age\b|vesting\b|cliff\b|warranty\b|degree\b|"
+    r"bachelor|master|undergraduate|program\b|plan\b|contract\b|lease\b|per\s+year\b)",
+    re.I,
+)
+_EXPERIENCE_CONTEXT_RE = re.compile(
+    r"\b(?:experience|exp\.?|yoe|background|track\s+record|hands[- ]on|practitioner|"
+    r"in\s+[a-z]|working\s+(?:with|in|on)|building|developing|designing|selling|managing|leading)\b",
+    re.I,
+)
+_UPPER_ONLY_EXP_RE = re.compile(
+    rf"\b(?:up\s+to|at\s+most|no\s+more\s+than|under|less\s+than)\s+"
+    rf"(?P<max>{_EXP_NUM_TOKEN})\s*(?:years?|yrs?)\s+(?:of\s+)?"
+    rf"(?:[a-z][a-z0-9/+,&'’-]*,?\s+){{0,5}}?(?:experience|exp\.?)\b",
+    re.I,
+)
+_RANGE_EXP_RE = re.compile(
+    rf"(?<![\w\-–—.])(?P<min>{_EXP_NUM_TOKEN})\s*(?:-|–|—|to)\s*"
+    rf"(?P<max>{_EXP_NUM_TOKEN})\s*\+?\s*(?:years?|yrs?|yoe)\b",
+    re.I,
+)
+_PLUS_EXP_RE = re.compile(
+    rf"(?<![\w\-–—.])(?P<min>{_EXP_NUM_TOKEN})\s*(?:\+|\bplus\b)\s*(?:years?|yrs?|yoe)\b|"
+    rf"(?<![\w\-–—.])(?P<min2>{_EXP_NUM_TOKEN})\s*(?:years?|yrs?)\+",
+    re.I,
+)
+_FLOOR_WORD_EXP_RE = re.compile(
+    rf"\b(?P<kw>(?:a\s+)?minimum(?:\s+of)?|min\.?(?:\s+of)?|at\s+least|more\s+than|over|above)\s+"
+    rf"(?P<min>{_EXP_NUM_TOKEN})\s*(?!(?:-|–|—|to)\s*\d)\+?\s*(?:years?|yrs?|yoe)\b",
+    re.I,
+)
+_LABELED_EXP_RE = re.compile(
+    rf"\b(?:required\s+|minimum\s+|total\s+|relevant\s+|professional\s+|work\s+|overall\s+)?"
+    rf"experience(?:\s+required)?\s*[:\-–]\s*(?P<min>{_EXP_NUM_TOKEN})"
+    rf"(?:\s*(?:-|–|—|to)\s*(?P<max>{_EXP_NUM_TOKEN}))?\s*\+?\s*(?:years?|yrs?)?\b",
+    re.I,
+)
+_PLAIN_YEARS_EXP_RE = re.compile(
+    rf"(?<![\w\-–—.])(?P<min>{_EXP_NUM_TOKEN})\s*(?:years?|yrs?)\s+(?:of\s+)?"
+    rf"(?:[a-z][a-z0-9/+,&'’-]*,?\s+){{0,6}}?(?:experience|exp\.?)\b",
+    re.I,
+)
+
+
+def _parse_exp_number(raw: str) -> float:
+    cleaned = re.sub(r"\(\s*\d+(?:\.\d+)?\s*\)", "", raw).strip().casefold()
+    return _EXP_NUMBER_WORDS[cleaned] if cleaned in _EXP_NUMBER_WORDS else float(cleaned)
+
+
+def _is_disqualified_exp_span(text: str, start: int, end: int) -> bool:
+    prefix = text[max(0, start - 45):start]
+    suffix = text[end:end + 80]
+    return bool(
+        _COMPANY_BOILERPLATE_PREFIX_RE.search(prefix)
+        or _NEGATED_EXP_PREFIX_RE.search(prefix)
+        or _OPTIONAL_PREFIX_RE.search(prefix)
+        or _NON_EXPERIENCE_SUFFIX_RE.search(suffix)
+        or _OPTIONAL_DIRECT_SUFFIX_RE.search(suffix)
+    )
+
+
+def extract_job_experience(
+    title: str, description: str
+) -> tuple[float | None, float | None]:
+    """Deterministically extract required (min_years, max_years) from title and JD.
+
+    Prioritizes explicit requirement sections over general prose, ignores preferred /
+    nice-to-have / bonus sections and optional clauses, and filters out company age,
+    roadmap ('next 3 years'), onboarding ('first year'), degree duration, and age/vesting.
+    """
+    segmented = _INLINE_SECTION_BREAK_RE.sub("\n", description or "")
+    lines = [title or "", *segmented.splitlines()]
+    section = "general"
+    by_bucket: dict[str, list[tuple[float, float | None]]] = {
+        "required": [],
+        "general": [],
+    }
+
+    for idx, raw_line in enumerate(lines):
+        line = raw_line.strip()
+        if not line:
+            continue
+        if idx > 0:
+            m_pref = _PREFERRED_HEADING_RE.match(line)
+            if m_pref and (len(line) < 90 or ":" in m_pref.group(0)):
+                section = "preferred"
+                continue
+            m_req = _REQUIRED_HEADING_RE.match(line)
+            if m_req and (len(line) < 90 or ":" in m_req.group(0)):
+                section = "required"
+                line = line[m_req.end():].strip()
+                if not line:
+                    continue
+            else:
+                m_ign = _IGNORED_HEADING_RE.match(line)
+                if m_ign and (len(line) < 90 or ":" in m_ign.group(0)):
+                    section = "ignored"
+                    line = line[m_ign.end():].strip()
+                    if not line:
+                        continue
+
+        if section == "preferred":
+            continue
+
+        clauses = re.split(r"(?<=[.!?])\s+|\s+[•·▪◦]\s+", line)
+        for clause in clauses:
+            c = clause.strip()
+            if not c:
+                continue
+            m_clause_pref = _PREFERRED_HEADING_RE.match(c)
+            if m_clause_pref and (len(c) < 90 or ":" in m_clause_pref.group(0)):
+                section = "preferred"
+                break
+
+            target_bucket = "required" if section == "required" else "general"
+            spans_used: list[tuple[int, int]] = []
+            clause_matches: list[tuple[int, int, float, float | None]] = []
+
+            def _overlaps(s: int, e: int) -> bool:
+                return any(not (e <= us or s >= ue) for us, ue in spans_used)
+
+            for um in _UPPER_ONLY_EXP_RE.finditer(c):
+                if _is_disqualified_exp_span(c, um.start(), um.end()):
+                    continue
+                max_v = _parse_exp_number(um.group("max"))
+                if 0.0 <= max_v <= 25.0:
+                    clause_matches.append((um.start(), um.end(), 0.0, max_v))
+                    spans_used.append((um.start(), um.end()))
+
+            for m in _RANGE_EXP_RE.finditer(c):
+                if _overlaps(m.start(), m.end()) or _is_disqualified_exp_span(c, m.start(), m.end()):
+                    continue
+                lo, hi = _parse_exp_number(m.group("min")), _parse_exp_number(m.group("max"))
+                if 0.0 <= lo <= hi <= 25.0:
+                    if section == "ignored" and not _EXPERIENCE_CONTEXT_RE.search(c[m.start():m.end() + 55]):
+                        continue
+                    clause_matches.append((m.start(), m.end(), lo, hi))
+                    spans_used.append((m.start(), m.end()))
+
+            for m in _PLUS_EXP_RE.finditer(c):
+                if _overlaps(m.start(), m.end()) or _is_disqualified_exp_span(c, m.start(), m.end()):
+                    continue
+                val = _parse_exp_number(m.group("min") or m.group("min2"))
+                if 0.0 <= val <= 25.0:
+                    if section == "ignored" and not _EXPERIENCE_CONTEXT_RE.search(c[m.start():m.end() + 55]):
+                        continue
+                    clause_matches.append((m.start(), m.end(), val, None))
+                    spans_used.append((m.start(), m.end()))
+
+            for m in _FLOOR_WORD_EXP_RE.finditer(c):
+                if _overlaps(m.start(), m.end()) or _is_disqualified_exp_span(c, m.start(), m.end()):
+                    continue
+                prefix = c[max(0, m.start() - 35):m.start()]
+                suffix = c[m.end():m.end() + 55]
+                kw = m.group("kw").casefold()
+                if kw in {"over", "more than", "above"}:
+                    if re.search(r"\bfor\s*$", prefix, re.I):
+                        continue
+                    if section != "required" and not _EXPERIENCE_CONTEXT_RE.search(suffix):
+                        continue
+                val = _parse_exp_number(m.group("min"))
+                if 0.0 <= val <= 25.0:
+                    clause_matches.append((m.start(), m.end(), val, None))
+                    spans_used.append((m.start(), m.end()))
+
+            for lm in _LABELED_EXP_RE.finditer(c):
+                if _overlaps(lm.start(), lm.end()) or _is_disqualified_exp_span(c, lm.start(), lm.end()):
+                    continue
+                lo = _parse_exp_number(lm.group("min"))
+                hi = _parse_exp_number(lm.group("max")) if lm.group("max") else None
+                if 0.0 <= lo <= 25.0 and (hi is None or lo <= hi <= 25.0):
+                    clause_matches.append((lm.start(), lm.end(), lo, hi))
+                    spans_used.append((lm.start(), lm.end()))
+
+            for m in _PLAIN_YEARS_EXP_RE.finditer(c):
+                if _overlaps(m.start(), m.end()) or _is_disqualified_exp_span(c, m.start(), m.end()):
+                    continue
+                prefix = c[max(0, m.start() - 35):m.start()]
+                if re.search(r"\b(?:up\s+to|at\s+most|under|less\s+than|no\s+more\s+than)\s*$", prefix, re.I):
+                    continue
+                val = _parse_exp_number(m.group("min"))
+                if 0.0 <= val <= 25.0 and section != "ignored":
+                    clause_matches.append((m.start(), m.end(), val, None))
+                    spans_used.append((m.start(), m.end()))
+
+            if not clause_matches:
+                continue
+            clause_matches.sort(key=lambda item: item[0])
+            if len(clause_matches) >= 2:
+                between = c[clause_matches[0][1]:clause_matches[1][0]]
+                if re.search(r"\bor\b", between, re.I) and not re.search(r"\b(?:and|with)\b", between, re.I):
+                    low_min = min(item[2] for item in clause_matches)
+                    low_maxes = [item[3] for item in clause_matches if item[2] == low_min and item[3] is not None]
+                    by_bucket[target_bucket].append((low_min, max(low_maxes) if low_maxes else None))
+                    continue
+            for _, _, lo, hi in clause_matches:
+                by_bucket[target_bucket].append((lo, hi))
+
+    chosen = by_bucket["required"] or by_bucket["general"]
+    if not chosen:
+        return None, None
+    best_min = max(item[0] for item in chosen)
+    max_candidates = [item[1] for item in chosen if item[0] == best_min and item[1] is not None]
+    best_max = max(max_candidates) if max_candidates else None
+    return best_min, best_max
+
+
 def enrich_job(job: Job) -> Job:
     j = job.model_copy(deep=True)
     text = f"{j.location} {j.title} {j.description}".lower()
@@ -234,59 +543,54 @@ def enrich_job(job: Job) -> Job:
     if j.remote_policy == "unknown":
         j.remote_policy = infer_remote_policy(j.location, j.title, j.description)
     if j.min_experience_years is None:
-        patterns = [
-            r"(\d+(?:\.\d+)?)\s*(?:-|–|to)\s*(\d+(?:\.\d+)?)\s*(?:years?|yrs?)",
-            r"(\d+(?:\.\d+)?)\+\s*(?:years?|yrs?)",
-            r"(?:minimum|min\.?|at least)\s*(\d+(?:\.\d+)?)\s*(?:years?|yrs?)",
-        ]
-        for index, pattern in enumerate(patterns):
-            match = re.search(pattern, text)
-            if not match:
-                continue
-            j.min_experience_years = float(match.group(1))
-            if index == 0:
-                j.max_experience_years = float(match.group(2))
-            break
+        min_exp, max_exp = extract_job_experience(j.title, j.description)
+        if min_exp is not None:
+            j.min_experience_years = min_exp
+            if j.max_experience_years is None:
+                j.max_experience_years = max_exp
     _parse_salary(j, text)
     return j
 
 
 def reenrich_job_metadata(job: Job) -> tuple[Job, bool, str]:
-    """Recompute derived country and workplace metadata safely for an existing indexed job.
+    """Recompute derived country, workplace, and experience metadata safely.
 
-    Greenhouse, Lever, and Generic JSON-LD connectors never populate remote_policy
-    directly, so their stored remote_policy is 100% derived and can be recomputed
-    offline. Ashby may set remote_policy='remote' from upstream isRemote; for Ashby,
-    explicit structured hybrid/onsite markers in location/title override stale values
-    while unconfirmed 'remote' values are retained and reported as ambiguous until
-    the next live Ashby board sync.
+    Greenhouse, Lever, Ashby, and Generic JSON-LD connectors derive
+    min_experience_years / max_experience_years exclusively via enrich_job.
+    Greenhouse, Lever, and Generic also derive remote_policy exclusively via
+    enrich_job, while Ashby may set remote_policy='remote' from upstream isRemote.
     """
     candidate = job.model_copy(deep=True)
+    candidate.min_experience_years = None
+    candidate.max_experience_years = None
     inferred_policy = infer_remote_policy(candidate.location, candidate.title, candidate.description)
     note = "unchanged"
 
     if candidate.source_kind in {"greenhouse", "lever", "generic"}:
         candidate.remote_policy = "unknown"
         updated = enrich_job(candidate)
-        if updated.remote_policy != job.remote_policy or updated.country != job.country:
-            note = f"{job.remote_policy}->{updated.remote_policy}"
-            return updated, True, note
-        return updated, False, note
+    else:
+        if inferred_policy in {"hybrid", "onsite"} and candidate.remote_policy != inferred_policy:
+            candidate.remote_policy = inferred_policy
+        elif candidate.remote_policy == "unknown" and inferred_policy != "unknown":
+            candidate.remote_policy = inferred_policy
+        updated = enrich_job(candidate)
+        if candidate.source_kind == "ashby" and updated.remote_policy == "remote" and inferred_policy == "unknown":
+            note = "ashby_upstream_or_legacy_remote"
 
-    # Ashby / learned / custom sources: structured hybrid/onsite overrides stale remote;
-    # otherwise preserve explicit upstream remote while reporting ambiguity when inferred='unknown'.
-    if inferred_policy in {"hybrid", "onsite"} and candidate.remote_policy != inferred_policy:
-        candidate.remote_policy = inferred_policy
-        updated = enrich_job(candidate)
-        return updated, True, f"{job.remote_policy}->{updated.remote_policy}"
-    if candidate.remote_policy == "unknown" and inferred_policy != "unknown":
-        candidate.remote_policy = inferred_policy
-        updated = enrich_job(candidate)
-        return updated, True, f"unknown->{updated.remote_policy}"
-    updated = enrich_job(candidate)
-    if candidate.source_kind == "ashby" and updated.remote_policy == "remote" and inferred_policy == "unknown":
-        note = "ashby_upstream_or_legacy_remote"
-    changed = (updated.remote_policy != job.remote_policy) or (updated.country != job.country)
+    policy_changed = updated.remote_policy != job.remote_policy
+    country_changed = updated.country != job.country
+    exp_changed = (
+        updated.min_experience_years != job.min_experience_years
+        or updated.max_experience_years != job.max_experience_years
+    )
+    changed = policy_changed or country_changed or exp_changed
+    if policy_changed:
+        note = f"{job.remote_policy}->{updated.remote_policy}"
+    elif exp_changed:
+        note = f"exp:{job.min_experience_years}->{updated.min_experience_years}"
+    elif country_changed:
+        note = f"country:{job.country}->{updated.country}"
     return updated, changed, note
 
 

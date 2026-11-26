@@ -18,7 +18,7 @@ from boardforge.confidence import GENERIC_QUERY_TERMS, assess_query_relevance, o
 from boardforge.matching import _has_query_overlap, job_text, rank_jobs, tokens
 from boardforge.models import Job, Match, Preferences
 from boardforge.observability import observe_embedding_request
-from boardforge.preferences import extract_experience_floor, is_entry_level_query
+from boardforge.preferences import extract_experience_floor, is_entry_level_target
 
 
 RETRIEVAL_QUERY = "RETRIEVAL_QUERY"
@@ -524,11 +524,7 @@ async def hybrid_rank_jobs(
         for index, vector in zip(missing_indexes, embedded):
             vectors[index] = vector
 
-    entry_level_target = (
-        (prefs.max_required_experience_years is not None
-         and prefs.max_required_experience_years <= 1.0)
-        or is_entry_level_query(query)
-    )
+    entry_level_target = is_entry_level_target(prefs, query)
     from boardforge.confidence import SENIORITY_TITLE_RE
 
     rescored = []

@@ -485,7 +485,7 @@ def test_missing_occupational_aliases_and_backend_role_boundaries():
     assert role_evidence(true_backend, "Backend") is not None
 
 
-def test_seniority_titles_penalized_and_flagged_for_entry_level_without_fabricating_years():
+def test_seniority_titles_excluded_for_entry_level_but_preserved_for_general_and_senior():
     senior_unstated = Job(
         source_kind="test", source_key="sen", external_id="sr",
         title="Senior Backend Engineer", company="Demo", country="India",
@@ -498,14 +498,30 @@ def test_seniority_titles_penalized_and_flagged_for_entry_level_without_fabricat
         location="Bengaluru, India", min_experience_years=None,
         description="Build Python backend services and APIs.",
     )
+    jr_stated = Job(
+        source_kind="test", source_key="sen", external_id="jr",
+        title="Junior Backend Engineer", company="Demo", country="India",
+        location="Bengaluru, India", min_experience_years=0.0,
+        description="Build Python backend services and APIs.",
+    )
     q = "Entry-level backend jobs in India requiring up to 1 year of experience"
     prefs = effective_search_preferences(Preferences(), q)
-    ranked = rank_jobs([senior_unstated, ic_unstated], prefs, query=q, top_k=10)
-    assert ranked[0].job.external_id == "ic"
-    sr_match = next(m for m in ranked if m.job.external_id == "sr")
-    assert sr_match.job.min_experience_years is None
-    assert sr_match.status == "needs_verification"
-    assert "seniority title conflicts with entry-level target" in sr_match.risks
+    ranked = rank_jobs([senior_unstated, ic_unstated, jr_stated], prefs, query=q, top_k=10)
+    assert [m.job.external_id for m in ranked] == ["jr", "ic"]
+    assert ranked[0].status == "recommended"
+    assert ranked[1].status == "needs_verification"
+    assert senior_unstated.min_experience_years is None
+
+    # General and explicitly senior searches still return Senior Backend Engineer.
+    gen_q = "Backend jobs in India"
+    gen_prefs = effective_search_preferences(Preferences(), gen_q)
+    gen_ids = [m.job.external_id for m in rank_jobs([senior_unstated, ic_unstated], gen_prefs, query=gen_q)]
+    assert "sr" in gen_ids and "ic" in gen_ids
+
+    sr_q = "Senior backend jobs in India"
+    sr_prefs = effective_search_preferences(Preferences(max_required_experience_years=1.0), sr_q)
+    sr_ids = [m.job.external_id for m in rank_jobs([senior_unstated, ic_unstated], sr_prefs, query=sr_q)]
+    assert "sr" in sr_ids
 
 
 def test_safe_reenrich_store_jobs_preserves_embedding_hashes(tmp_path: Path):

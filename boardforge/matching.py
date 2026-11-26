@@ -15,7 +15,7 @@ from boardforge.confidence import (
 )
 from boardforge.enrich import infer_country, salary_min_lpa
 from boardforge.models import Job, Match, MatchEvidence, Preferences
-from boardforge.preferences import extract_experience_floor, is_entry_level_query
+from boardforge.preferences import extract_experience_floor, is_entry_level_target
 
 
 WORD_RE = re.compile(r"[a-zA-Z0-9+#.]{2,}")
@@ -217,7 +217,7 @@ def role_evidence(job: Job, role: str) -> MatchEvidence | None:
     return None
 
 
-def hard_violations(job: Job, preferences: Preferences) -> list[str]:
+def hard_violations(job: Job, preferences: Preferences, query: str = "") -> list[str]:
     text = job_text(job).lower()
     violations: list[str] = []
 
@@ -263,6 +263,11 @@ def hard_violations(job: Job, preferences: Preferences) -> list[str]:
     if preferences.max_required_experience_years is not None and job.min_experience_years is not None:
         if job.min_experience_years > preferences.max_required_experience_years:
             violations.append("experience")
+
+    if is_entry_level_target(preferences, query) and (
+        SENIORITY_TITLE_RE.search(job.title) or LEADERSHIP_TITLE_RE.search(job.title)
+    ):
+        violations.append("seniority_title")
 
     if not preferences.remote_ok and job.remote_policy == "remote":
         violations.append("remote_policy")
@@ -383,11 +388,7 @@ def rank_jobs(
     if top_k <= 0:
         return []
     rejected_ids = rejected_ids or set()
-    entry_level_target = (
-        (preferences.max_required_experience_years is not None
-         and preferences.max_required_experience_years <= 1.0)
-        or is_entry_level_query(query)
-    )
+    entry_level_target = is_entry_level_target(preferences, query)
     min_floor = extract_experience_floor(query) if query.strip() else None
     low_query = query.casefold()
     explicit_remote_requested = (
@@ -399,7 +400,7 @@ def rank_jobs(
     for job in jobs:
         if job.stable_id in rejected_ids:
             continue
-        violations = hard_violations(job, preferences)
+        violations = hard_violations(job, preferences, query=query)
         if violations:
             continue
         reasons, risks, bonus, structured_evidence = evidence(job, preferences)

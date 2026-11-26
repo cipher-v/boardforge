@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import json
 import re
 import httpx
@@ -51,7 +52,8 @@ class GenericJsonLdConnector(JobConnector):
                     loc = loc[0] if loc else {}
                 addr = (loc.get("address") or {}) if isinstance(loc, dict) else {}
                 location = ", ".join(str(addr.get(k,"")) for k in ["addressLocality","addressRegion","addressCountry"] if addr.get(k))
-                desc = re.sub(r"<[^>]+>", " ", str(node.get("description",""))).strip()
+                raw_desc = html.unescape(str(node.get("description", "")))
+                desc = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", raw_desc)).strip()
                 url = node.get("url") or source.board_url
                 ext = str(node.get("identifier") or url or idx)
                 jobs.append(Job(

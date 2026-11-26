@@ -468,13 +468,13 @@ def _confirmed_no_vacancy(job: Job) -> bool:
 
 
 def _eligibility_restrictions(
-    match: Match, preferences: Preferences, rejected_ids: set[str]
+    match: Match, preferences: Preferences, rejected_ids: set[str], *, intent: str = ""
 ) -> list[str]:
     """Conditions a relevance judgment must never waive."""
     restrictions: list[str] = []
     if match.job.stable_id in rejected_ids:
         restrictions.append("rejected_job_memory")
-    restrictions.extend(hard_violations(match.job, preferences))
+    restrictions.extend(hard_violations(match.job, preferences, query=intent))
     if preferences.min_salary_lpa is not None and salary_min_lpa(match.job) is None:
         restrictions.append("salary_eligibility_unknown")
     if (
@@ -744,7 +744,9 @@ class RelevanceVerifier:
         protected_by_reason: dict[str, int] = {}
         restricted_ids: set[str] = set()
         for match in matches:
-            restrictions = _eligibility_restrictions(match, preferences, rejected_ids)
+            restrictions = _eligibility_restrictions(
+                match, preferences, rejected_ids, intent=intent
+            )
             if restrictions:
                 protected += 1
                 restricted_ids.add(match.job.stable_id)

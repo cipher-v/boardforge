@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass
 
 from boardforge.models import Job, Match, MatchEvidence, Preferences
-from boardforge.preferences import EXPERIENCE_CAP_RE, extract_experience_floor, is_entry_level_query
+from boardforge.preferences import EXPERIENCE_CAP_RE, extract_experience_floor, is_entry_level_target
 
 
 TOKEN_RE = re.compile(r"[a-zA-Z0-9+#.]{2,}")
@@ -64,8 +64,10 @@ LEADERSHIP_TITLE_RE = re.compile(
     re.I,
 )
 SENIORITY_TITLE_RE = re.compile(
-    r"\b(?:senior|sr\.?|staff|principal|lead|director|head|vp|vice president|"
-    r"architect|distinguished|iii|iv|l[4-9]|p[4-9])\b",
+    r"(?<!rising\s)\b(?:senior|sr\.?|staff|principal|distinguished|fellow|lead|leader|"
+    r"director|head|vp|vice\s+president|chief|cto|cio|ciso|architect|"
+    r"iii|iv|(?:sde|swe)[- ]?[3-9]|l[5-9]|p[5-9])\b|"
+    r"(?<!associate\sproduct\s)\bmanager\b",
     re.I,
 )
 ACCOUNT_MANAGER_RE = re.compile(r"\b(?:technical\s+)?account manager\b", re.I)
@@ -304,11 +306,7 @@ def enforce_recommendation_confidence(
     ):
         uncertain_reasons.append("generic engineering title lacks coherent task evidence")
 
-    entry_level_target = (
-        (preferences.max_required_experience_years is not None
-         and preferences.max_required_experience_years <= 1.0)
-        or is_entry_level_query(query)
-    )
+    entry_level_target = is_entry_level_target(preferences, query)
     if entry_level_target and SENIORITY_TITLE_RE.search(match.job.title):
         uncertain_reasons.append("seniority title conflicts with entry-level target")
 

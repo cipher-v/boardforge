@@ -115,6 +115,11 @@ ENTRY_LEVEL_CUE_RE = re.compile(
     r"\b(?:entry[- ]level|early[- ]career|freshers?|new grads?|recent graduates?)\b",
     re.I,
 )
+EXPLICIT_SENIOR_QUERY_RE = re.compile(
+    r"\b(?:senior|sr\.?|staff|principal|distinguished|lead|leader|manager|"
+    r"director|head\s+of|vp|vice\s+president|architect|cto)\b",
+    re.I,
+)
 
 
 def _parse_number(raw: str) -> float:
@@ -168,6 +173,31 @@ def infer_entry_level_cap(text: str) -> float | None:
 def is_entry_level_query(text: str) -> bool:
     low = text.lower()
     return bool(NO_EXPERIENCE_RE.search(low) or ENTRY_LEVEL_CUE_RE.search(low))
+
+
+def is_explicit_senior_query(text: str) -> bool:
+    low = text.lower()
+    return any(
+        not _is_negated(low, match.start())
+        for match in EXPLICIT_SENIOR_QUERY_RE.finditer(low)
+    )
+
+
+def is_entry_level_target(preferences: Preferences, query: str = "") -> bool:
+    """True when targeting entry-level, fresher, or <=1yr roles, unless explicitly senior."""
+    if query.strip():
+        if is_entry_level_query(query):
+            return True
+        explicit_cap = extract_experience_cap(query)
+        if explicit_cap is not None:
+            return explicit_cap <= 1.0
+        floor = extract_experience_floor(query)
+        if is_explicit_senior_query(query) or (floor is not None and floor > 1.0):
+            return False
+    return (
+        preferences.max_required_experience_years is not None
+        and preferences.max_required_experience_years <= 1.0
+    )
 
 
 def _extract_explicit_in_countries(low: str) -> list[str]:
@@ -316,6 +346,16 @@ def effective_search_preferences(current: Preferences, text: str) -> Preferences
         effective.min_salary_lpa = transient.min_salary_lpa
     if transient.max_required_experience_years is not None:
         effective.max_required_experience_years = transient.max_required_experience_years
+    elif (
+        effective.max_required_experience_years is not None
+        and effective.max_required_experience_years <= 1.0
+        and not is_entry_level_query(text)
+    ):
+        floor = extract_experience_floor(text)
+        if is_explicit_senior_query(text) or (
+            floor is not None and floor > effective.max_required_experience_years
+        ):
+            effective.max_required_experience_years = None
     if transient.paid_only:
         effective.paid_only = True
     if any(term in low for term in ["remote", "onsite", "on-site"]):
