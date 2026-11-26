@@ -265,7 +265,7 @@
       "name": "pref_natural_1",
       "text": "I changed my mind, Pune is fine too",
       "expected_tools": [
-        "update_preferences"
+        "search_jobs"
       ]
     },
     {

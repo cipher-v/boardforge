@@ -10,10 +10,13 @@ from boardforge.discovery.web import (
     discover_and_sync,
 )
 from boardforge.discovery.service import (
-    discovery_fingerprint,
+     discovery_fingerprint,
+    dispatch_discovery_execution,
+    queue_and_dispatch_discovery,
     queue_discovery,
     run_pending_discoveries,
     run_discovery_request,
+    trigger_cloud_run_maintenance_job,
 )
 
 __all__ = [
@@ -27,7 +30,10 @@ __all__ = [
     "create_search_provider",
     "discover_and_sync",
     "discovery_fingerprint",
+    "dispatch_discovery_execution",
+    "queue_and_dispatch_discovery",
     "queue_discovery",
     "run_pending_discoveries",
     "run_discovery_request",
+    "trigger_cloud_run_maintenance_job",
 ]

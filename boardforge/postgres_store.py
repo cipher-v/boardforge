@@ -756,8 +756,11 @@ class PostgresStore:
     @staticmethod
     def _discovery_row(row: dict, *, cached: bool = False) -> dict:
         return {
-            "request_id": int(row["id"]), "status": row["status"],
-            "cached": cached, "report": row["report"],
+            "request_id": int(row["id"]),
+            "profile_id": row["profile_id"],
+            "status": row["status"],
+            "cached": cached,
+            "report": row["report"],
             "attempt_count": int(row["attempt_count"]),
             "last_error": row["last_error"],
         }
@@ -784,7 +787,13 @@ class PostgresStore:
                    VALUES(%s,%s,%s,'queued',%s) RETURNING id""",
                 (profile_id, fingerprint, query, now),
             ).fetchone()["id"]
-        return {"request_id": request_id, "status": "queued", "cached": False, "report": None}
+        return {
+            "request_id": request_id,
+            "profile_id": profile_id,
+            "status": "queued",
+            "cached": False,
+            "report": None,
+        }
 
     def discovery_request(self, request_id: int) -> dict | None:
         with self.connect() as connection:

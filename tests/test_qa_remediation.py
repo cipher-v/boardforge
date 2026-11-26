@@ -162,7 +162,13 @@ def test_explicit_preference_updates_still_persist_and_tool_guard_blocks_searche
     assert prefs.countries == ["India"]
     assert "qa" in [t.casefold() for t in prefs.avoid_terms]
 
-    r2 = asyncio.run(agent.handle("u", "I changed my mind, include QA roles"))
+    # Conversational "changed my mind" without explicit persistence is transient.
+    r_transient = asyncio.run(agent.handle("u", "Changed my mind, show me QA roles"))
+    assert [s["tool"] for s in r_transient.data["trace"]] == ["search_jobs"]
+    assert "qa" in [t.casefold() for t in store.load_preferences("u").avoid_terms]
+
+    # Explicit durable persistence rehabilitates previously avoided roles.
+    r2 = asyncio.run(agent.handle("u", "From now on, include QA roles"))
     assert [s["tool"] for s in r2.data["trace"]] == ["update_preferences"]
     prefs2 = store.load_preferences("u")
     assert "QA" in prefs2.roles

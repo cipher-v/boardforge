@@ -13,10 +13,22 @@ from boardforge.workers import sync_due_sources
 
 
 async def run_worker_cycle(store, embeddings: EmbeddingClient) -> dict:
-    discovery = await run_pending_discoveries(store, limit=25)
+    discovery_limit = max(
+        1, min(10, int(os.getenv("BOARDFORGE_DISCOVERY_REQUESTS_PER_CYCLE", "5")))
+    )
+    discovery = await run_pending_discoveries(store, limit=discovery_limit)
     sync_interval = max(60, int(os.getenv("BOARDFORGE_SOURCE_SYNC_SECONDS", "3600")))
+    sync_limit = max(
+        1, min(25, int(os.getenv("BOARDFORGE_SOURCE_SYNC_LIMIT", "10")))
+    )
+    sync_concurrency = max(
+        1, min(8, int(os.getenv("BOARDFORGE_SOURCE_SYNC_CONCURRENCY", "4")))
+    )
     sources = await sync_due_sources(
-        store, interval_seconds=sync_interval, limit=25, concurrency=4,
+        store,
+        interval_seconds=sync_interval,
+        limit=sync_limit,
+        concurrency=sync_concurrency,
     )
     embedding_result: dict = {"status": "disabled"}
     if embeddings.enabled:
@@ -32,8 +44,8 @@ async def run_worker_cycle(store, embeddings: EmbeddingClient) -> dict:
                 max_jobs=max(
                     1,
                     min(
-                        1000,
-                        int(os.getenv("BOARDFORGE_EMBEDDING_JOBS_PER_CYCLE", "100")),
+                        250,
+                        int(os.getenv("BOARDFORGE_EMBEDDING_JOBS_PER_CYCLE", "64")),
                     ),
                 ),
             )

@@ -1,57 +1,41 @@
 # GCP deployment
 
-BoardForge deploys as two resources sharing the same image:
+BoardForge deploys as two Cloud Run resources sharing one image and service account:
 
-- a Cloud Run service for the API;
-- a one-shot Cloud Run Job for discovery, source refresh, and embedding backfill.
+- **`boardforge-api` (Cloud Run Service):** serves the web workspace, authenticated API, Vertex hybrid retrieval (`gemini-embedding-001`), Vertex relevance verification (`gemini-3.8-flash`), and bounded Vertex intelligent-agent orchestration.
+- **`boardforge-maintenance` (one-shot Cloud Run Job):** drains queued Tavily discovery requests (`python -m boardforge.worker --once`), refreshes due official ATS boards, and backfills missing pgvector document embeddings. There is **no always-running worker** in production.
 
-Create two Secret Manager secrets before deployment:
+## Secrets
+
+Create the required Secret Manager entries before deploying (never commit credentials to repository files):
 
 ```powershell
 "postgresql://..." | gcloud secrets create boardforge-database-url --data-file=-
 "tvly-..." | gcloud secrets create boardforge-tavily-key --data-file=-
 ```
 
-Then deploy from the repository root:
+## Deploy
 
 ```powershell
 .\deploy\gcp\deploy.ps1 -ProjectId YOUR_PROJECT_ID -Region us-central1
 ```
 
-Add `-PublicApi` only for an intentional public demo. If the API is public,
-configure `BOARDFORGE_PROFILE_TOKENS` and `BOARDFORGE_ADMIN_TOKEN` as secrets or
-use Cloud Run/IAP authentication.
+Add `-PublicApi` only when exposing the web UI publicly; when `-PublicApi` is set, configure `BOARDFORGE_PROFILE_TOKENS` and `BOARDFORGE_ADMIN_TOKEN` secrets or front the service with Cloud Run IAM / IAP.
 
-The script creates a least-purpose runtime service account, grants Vertex AI
-User and Secret Manager Secret Accessor, builds the image, and deploys both
-resources. It does not create or modify the external PostgreSQL database.
+## Feature Gates & On-Demand Worker Dispatch
 
-The optional relevance verifier remains disabled unless deployment explicitly
-passes `-EnableRelevanceVerifier`. Vertex Gemini is the default and authenticates
-as the existing Cloud Run service account, so it requires no extra API-key
-secret:
+`deploy.ps1` explicitly configures Vertex as the single supported deployment provider:
 
-```powershell
-.\deploy\gcp\deploy.ps1 -ProjectId YOUR_PROJECT_ID -EnableRelevanceVerifier
-```
+- `BOARDFORGE_ENABLE_EMBEDDINGS=1` (`BOARDFORGE_EMBEDDING_PROVIDER=vertex`, `gemini-embedding-001`, 768-d)
+- `BOARDFORGE_ENABLE_RELEVANCE_VERIFIER=1` (`BOARDFORGE_RELEVANCE_PROVIDER=vertex`, `gemini-3.8-flash`)
+- `BOARDFORGE_ENABLE_INTELLIGENT_AGENT=1` (`BOARDFORGE_AGENT_PROVIDER=vertex`, `gemini-3.8-flash`)
+- `BOARDFORGE_ENABLE_LLM_PREFERENCES=0` (OpenAI-dependent preference extraction stays disabled)
+- `BOARDFORGE_DISCOVERY_DISPATCH_MODE=cloud_run_job` (`BOARDFORGE_MAINTENANCE_JOB=boardforge-maintenance`)
 
-The script then sets `BOARDFORGE_ENABLE_RELEVANCE_VERIFIER=1`, a 20-candidate
-shortlist and batches of eight. The maintenance job receives neither relevance
-configuration nor a provider key because verification runs only during
-interactive search. Omit the switch for deterministic baseline deployments.
-The cost-estimation rates in the deployment environment reflect Gemini 3.8
-Flash pricing through 2026-12-31 and must be updated if Google changes pricing.
+Any individual gate can be turned off at deploy time via `-EnableEmbeddings:$false`, `-EnableRelevanceVerifier:$false`, or `-EnableIntelligentAgent:$false`.
 
-To use Groq instead, create `boardforge-relevance-key` and deploy with
-`-RelevanceProvider groq -RelevanceModel openai/gpt-oss-120b`. Only that
-alternative mounts the provider key into the API service.
-
-For a manual maintenance run:
+When a user clicks **Discover more opportunities** (`POST /discover/{profile_id}`) or an explicit conditional agent turn queues `discover_job_sources`, the API persists a deduplicated `'queued'` row in PostgreSQL and dispatches `boardforge-maintenance` on demand via the Cloud Run Jobs v2 `:run` API (scoped via `roles/run.developer` on `boardforge-maintenance` only, with a per-instance dispatch cooldown and `--parallelism 1 --tasks 1`). You may also schedule periodic source refreshes via Cloud Scheduler or run a manual cycle:
 
 ```powershell
 gcloud run jobs execute boardforge-maintenance --region us-central1 --wait
 ```
-
-In production, invoke that job from Cloud Scheduler at the desired interval.
-The job is deliberately one-shot; the infinite local worker is intended for
-Docker Compose, not a Cloud Run service.

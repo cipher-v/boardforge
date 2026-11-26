@@ -303,7 +303,7 @@ async def discover_and_sync(
     prefs: Preferences,
     *,
     query: str = "",
-    max_boards: int = 8,
+    max_boards: int | None = None,
     client: SearchProvider | None = None,
 ) -> DiscoveryReport:
     client = client or create_search_provider(store)
@@ -318,6 +318,19 @@ async def discover_and_sync(
             ),
         )
 
+    configured_boards = (
+        max_boards
+        if max_boards is not None
+        else int(os.getenv("BOARDFORGE_DISCOVERY_MAX_BOARDS", "6"))
+    )
+    bounded_boards = max(1, min(8, configured_boards))
+    bounded_results = max(
+        1, min(20, int(os.getenv("BOARDFORGE_DISCOVERY_MAX_RESULTS", "15")))
+    )
+    sync_concurrency = max(
+        1, min(4, int(os.getenv("BOARDFORGE_DISCOVERY_SYNC_CONCURRENCY", "3")))
+    )
+
     discovery_query = build_discovery_query(profile, prefs, query)
     report = DiscoveryReport(
         enabled=True,
@@ -326,7 +339,7 @@ async def discover_and_sync(
     )
 
     try:
-        urls = await client.search_urls(discovery_query, count=20)
+        urls = await client.search_urls(discovery_query, count=bounded_results)
     except SearchProviderError as exc:
         report.failures += 1
         report.retryable = exc.retryable
@@ -340,7 +353,7 @@ async def discover_and_sync(
         report.reason = str(exc)
         urls = []
 
-    sources = canonical_sources(urls)[:max_boards]
+    sources = canonical_sources(urls)[:bounded_boards]
     report.discovered_boards = len(sources)
     provenance = (
         "manual:"
@@ -350,32 +363,34 @@ async def discover_and_sync(
         if query
         else "profile-derived"
     )
+    semaphore = asyncio.Semaphore(sync_concurrency)
 
     async def sync_source(source: SourceRef) -> None:
-        store.record_discovered_source(
-            source.kind, source.key, source.board_url, provenance
-        )
-        try:
-            summary = await sync_url(source.board_url, store)
-            report.synced_boards += 1
-            report.jobs_fetched += summary.fetched
+        async with semaphore:
             store.record_discovered_source(
-                source.kind,
-                source.key,
-                source.board_url,
-                provenance,
-                synced=True,
-                status="synced",
+                source.kind, source.key, source.board_url, provenance
             )
-        except Exception:
-            report.failures += 1
-            store.record_discovered_source(
-                source.kind,
-                source.key,
-                source.board_url,
-                provenance,
-                status="failed",
-            )
+            try:
+                summary = await sync_url(source.board_url, store)
+                report.synced_boards += 1
+                report.jobs_fetched += summary.fetched
+                store.record_discovered_source(
+                    source.kind,
+                    source.key,
+                    source.board_url,
+                    provenance,
+                    synced=True,
+                    status="synced",
+                )
+            except Exception:
+                report.failures += 1
+                store.record_discovered_source(
+                    source.kind,
+                    source.key,
+                    source.board_url,
+                    provenance,
+                    status="failed",
+                )
 
     await asyncio.gather(*(sync_source(source) for source in sources))
     return report

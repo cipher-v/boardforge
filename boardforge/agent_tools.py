@@ -9,7 +9,7 @@ from typing import Any, Awaitable, Callable, Literal
 from pydantic import BaseModel, Field, ValidationError
 
 from boardforge.agent import JobAgent
-from boardforge.discovery.service import queue_discovery
+from boardforge.discovery.service import queue_and_dispatch_discovery
 from boardforge.models import CandidateProfile, FeedbackRequest
 from boardforge.sync import sync_url
 
@@ -115,6 +115,7 @@ class AgentExecutionState:
     trace: list[dict[str, Any]] = field(default_factory=list)
     last_search: dict[str, Any] | None = None
     best_search: dict[str, Any] | None = None
+    discovery: dict[str, Any] | None = None
 
 
 Syncer = Callable[[str, Any], Awaitable[Any]]
@@ -154,9 +155,10 @@ class AgentToolExecutor:
         if not _is_explicit_preference_update(user_text):
             return False
         return bool(re.search(
-            r"\b(?:only|must|do not|don't|dont|avoid|exclude|remove|from now on|"
-            r"anymore|remember|save|update|changed my mind|prefer|want|need|"
-            r"minimum|at least|remote|onsite|on-site|hybrid|worldwide)\b",
+            r"\b(?:only|must|do not|don't|dont|stop showing|avoid|exclude|remove|"
+            r"from now on|going forward|in future|permanently|always|anymore|"
+            r"remember|save|update|persist|prefer|want|need|"
+            r"minimum|at least|no unpaid|worldwide)\b",
             quote, re.I,
         ))
 
@@ -328,10 +330,11 @@ class AgentToolExecutor:
                 return {"ok": False, "error": "discovery_unnecessary_sufficient_results"}
             profile = self.store.load_candidate_profile(state.profile_id) or CandidateProfile()
             preferences = self.store.load_preferences(state.profile_id)
-            queued = queue_discovery(
+            queued = await queue_and_dispatch_discovery(
                 self.store, state.profile_id, profile, preferences,
                 query=arguments.query, client=self.discovery_client,
             )
+            state.discovery = queued
             state.discovery_requested = queued.get("status") in {"queued", "running"}
             result = {"discovery": queued}
         else:  # synchronize_trusted_source

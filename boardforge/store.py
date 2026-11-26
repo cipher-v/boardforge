@@ -663,6 +663,7 @@ class Store:
             request_id = int(cursor.lastrowid)
         return {
             "request_id": request_id,
+            "profile_id": profile_id,
             "status": "queued",
             "cached": False,
             "report": None,
@@ -672,6 +673,7 @@ class Store:
     def _discovery_row(row: sqlite3.Row, *, cached: bool = False) -> dict:
         return {
             "request_id": int(row["id"]),
+            "profile_id": row["profile_id"],
             "status": row["status"],
             "cached": cached,
             "report": json.loads(row["report"]) if row["report"] else None,

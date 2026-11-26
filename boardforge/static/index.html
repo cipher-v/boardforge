@@ -61,6 +61,7 @@ main{max-width:1160px;padding:48px 24px 70px}
 .search-actions small{color:var(--muted)}.searchbtn{height:auto;padding:12px 20px}
 .quick{margin:14px 0 0;gap:7px}.quick button{background:#fff;border-color:var(--line);color:var(--muted);font-size:12px;padding:6px 10px}.quick button:hover{color:var(--accent);background:var(--panel2)}
 .resultline{font-size:13px;color:var(--muted);margin:24px 0 12px}
+.discovery-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;margin:0 0 14px;border:1px solid var(--line);border-radius:12px;background:var(--panel);font-size:13px;color:var(--muted)}.discovery-bar[hidden]{display:none}.discovery-copy{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.tag.failed{color:var(--red);border-color:#E4B8B8;background:#FDF2F2}
 .empty{min-height:235px;color:var(--muted);background:#FCFCFA}.empty strong{color:var(--text);font-family:Georgia,serif;font-size:22px;font-weight:normal}
 .job{padding:22px;overflow-wrap:anywhere}.job:hover{border-color:#9BAFA3}.job h3{font-size:19px;letter-spacing:-.3px}.company{color:var(--muted);font-size:14px}
 .matchscore strong{color:var(--accent)}.matchscore span{color:var(--muted)}
@@ -72,7 +73,7 @@ details.advanced{margin:0;padding:0;border:0}details.advanced>summary{font-size:
 .activity{padding:16px;margin-top:16px}.activity[hidden]{display:none}.activity summary{cursor:pointer;font-weight:650;color:var(--accent)}.activity ul{margin:12px 0 0;padding-left:20px;font-size:13px;color:var(--muted)}
 .source-evidence{background:#F5F7F3;border-left:3px solid #A5B9A8;padding:10px 12px;margin:12px 0 0;font-size:13px;color:var(--text)}.source-evidence summary{cursor:pointer;font-weight:600}.source-evidence p{margin:8px 0}
 button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
-@media(max-width:800px){main{padding:28px 16px 50px}.workspace{grid-template-columns:1fr;gap:24px}.sidebar{grid-row:2}.workspace-main{grid-row:1}.search-actions{flex-wrap:wrap}.searchbtn{width:auto}.jobhead{flex-direction:column}.details{grid-template-columns:1fr}}
+@media(max-width:800px){main{padding:28px 16px 50px}.workspace{grid-template-columns:1fr;gap:24px}.sidebar{grid-row:2}.workspace-main{grid-row:1}.search-actions{flex-wrap:wrap}.searchbtn{width:auto}.jobhead{flex-direction:column}.details{grid-template-columns:1fr}.discovery-bar{flex-direction:column;align-items:flex-start}}
 
 .access-panel{max-width:440px;margin:36px auto;padding:24px;border:1px solid var(--line);background:white;border-radius:12px}.access-panel input{display:block;width:100%;padding:12px;margin:12px 0;border:1px solid var(--line);border-radius:8px}.access-panel[hidden],main[hidden],#signOut[hidden],#sourceAdmin[hidden]{display:none}.access-panel h2{font-family:Georgia,serif;font-weight:normal}
 </style>
@@ -142,6 +143,13 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
 
   </div><details class="activity" id="agentActivity" hidden><summary>Search activity</summary><ul id="activitySteps"></ul></details>
   <div class="resultline" id="searchStatus" role="status" aria-live="polite">Upload a resume for recommendations, or search above.</div>
+  <div class="discovery-bar" id="discoveryBar" hidden>
+    <div class="discovery-copy">
+      <span class="tag" id="discoveryStateBadge" hidden></span>
+      <span id="discoveryStatus">Need broader coverage? Scan official job boards for matching opportunities.</span>
+    </div>
+    <button class="btn" id="discoverBtn" type="button">Discover more opportunities</button>
+  </div>
   <div class="results" id="results">
     <div class="empty"><div><strong>No recommendations yet.</strong>Upload your resume or search for a role.</div></div>
   </div>
@@ -191,10 +199,26 @@ async function connect(token=''){
   }
 }
 
-let hasProfile=false;
+let hasProfile=false,lastSearchQuery='',discoverySubmitting=false,discoveryPollToken=0,discoveryPollTimer=null,activeDiscoveryId=null;
+const refreshedDiscoveryIds=new Set();
 const $=id=>document.getElementById(id);
+function stopDiscoveryPolling(){
+  discoveryPollToken++;
+  if(discoveryPollTimer){clearTimeout(discoveryPollTimer);discoveryPollTimer=null;}
+  activeDiscoveryId=null;discoverySubmitting=false;
+}
+function resetDiscoveryBar(){
+  stopDiscoveryPolling();
+  lastSearchQuery='';refreshedDiscoveryIds.clear();
+  const bar=$('discoveryBar'),badge=$('discoveryStateBadge'),btn=$('discoverBtn'),st=$('discoveryStatus');
+  if(bar)bar.hidden=true;
+  if(badge){badge.hidden=true;badge.textContent='';badge.className='tag';}
+  if(st)st.textContent='Need broader coverage? Scan official job boards for matching opportunities.';
+  if(btn){btn.disabled=false;btn.hidden=false;}
+}
 function resetWorkspace(message='Upload a resume for recommendations, or search above.'){
   workspaceVersion++;
+  resetDiscoveryBar();
   searchRequest++;searchRunning=false;$('searchBtn').disabled=false;
   activeProfile=null;hasProfile=false;
   $('profileChips').replaceChildren();$('profileEvidence').replaceChildren();
@@ -360,21 +384,179 @@ for(const event of ['dragleave','drop'])drop.addEventListener(event,e=>{e.preven
 drop.addEventListener('drop',e=>uploadResume(e.dataTransfer.files[0]));
 
 let searchRunning=false,searchRequest=0;
+function setDiscoveryBadge(status){
+  const badge=$('discoveryStateBadge');
+  if(!badge)return;
+  const map={
+    queued:['Queued','tag verify'],
+    running:['Running','tag verify'],
+    completed:['Completed','tag recommended'],
+    failed:['Failed','tag failed'],
+    disabled:['Disabled','tag']
+  };
+  const entry=map[status];
+  if(!entry){badge.hidden=true;badge.textContent='';badge.className='tag';return;}
+  badge.hidden=false;badge.textContent=entry[0];badge.className=entry[1];
+}
+async function refreshSearchAfterDiscovery(targetQuery,expectedProfile,expectedVersion){
+  if(!targetQuery||expectedVersion!==workspaceVersion||expectedProfile!==profileId)return false;
+  try{
+    const refreshed=await api('/search',{profile_id:expectedProfile,query:targetQuery,top_k:10});
+    if(expectedVersion!==workspaceVersion||expectedProfile!==profileId)return false;
+    const nextMatches=Array.isArray(refreshed.matches)?refreshed.matches:[];
+    render(nextMatches);
+    $('searchStatus').textContent='Updated after source discovery · '+nextMatches.length+' result(s) for "'+targetQuery+'".';
+    return true;
+  }catch(_){
+    return false;
+  }
+}
+async function applyDiscoveryState(rec,targetQuery,opts={}){
+  if(!rec||typeof rec!=='object')return;
+  const bar=$('discoveryBar'),st=$('discoveryStatus'),btn=$('discoverBtn');
+  bar.hidden=false;
+  const status=String(rec.status||'');
+  setDiscoveryBadge(status);
+  if(status==='disabled'){
+    stopDiscoveryPolling();
+    st.textContent=rec.reason||'External discovery is disabled in this environment; searching existing index only.';
+    btn.disabled=true;
+    return;
+  }
+  if(status==='queued'||status==='running'){
+    const idLabel=rec.request_id!=null?' (#'+rec.request_id+')':'';
+    st.textContent=status==='queued'
+      ?'Discovery queued'+idLabel+' · waiting for source scan…'
+      :'Scanning official job boards'+idLabel+' for new roles…';
+    btn.disabled=true;
+    if(rec.request_id!=null&&activeDiscoveryId!==rec.request_id){
+      pollDiscovery(rec.request_id,targetQuery);
+    }
+    return;
+  }
+  if(status==='completed'){
+    const reqId=rec.request_id;
+    stopDiscoveryPolling();
+    const rep=rec.report||{};
+    const boards=Number(rep.synced_boards||0),fetched=Number(rep.jobs_fetched||0);
+    btn.disabled=true;
+    if(rec.cached&&opts.fromDirectSubmit){
+      if(Array.isArray(opts.initialMatches)&&opts.initialMatches.length)render(opts.initialMatches);
+      st.textContent='Recent discovery reused · '+boards+' board(s) synced, '+fetched+' job(s) checked.';
+      return;
+    }
+    const alreadyRefreshed=reqId!=null&&refreshedDiscoveryIds.has(reqId);
+    if(!alreadyRefreshed&&targetQuery){
+      if(reqId!=null)refreshedDiscoveryIds.add(reqId);
+      st.textContent='Discovery completed · '+boards+' board(s) synced, '+fetched+' job(s) fetched · refreshing results…';
+      const updated=await refreshSearchAfterDiscovery(targetQuery,profileId,workspaceVersion);
+      if(st&&profileId){
+        st.textContent='Discovery completed · '+boards+' board(s) synced, '+fetched+' job(s) fetched'+(updated?' · results refreshed.':'.');
+      }
+    }else{
+      st.textContent='Discovery completed · '+boards+' board(s) synced, '+fetched+' job(s) fetched.';
+    }
+    return;
+  }
+  if(status==='failed'){
+    stopDiscoveryPolling();
+    const detail=rec.last_error||rec.report?.reason||'';
+    st.textContent='Discovery failed'+(detail?': '+detail:'.');
+    btn.disabled=false;
+    return;
+  }
+}
+function pollDiscovery(requestId,targetQuery){
+  stopDiscoveryPolling();
+  const token=++discoveryPollToken,version=workspaceVersion,pollProfile=profileId;
+  activeDiscoveryId=requestId;
+  const maxPolls=Math.max(1,Number(window.__DISCOVERY_MAX_POLLS||24));
+  const baseMs=Math.max(15,Number(window.__DISCOVERY_POLL_MS||1200));
+  let attempt=0;
+  const step=async()=>{
+    if(token!==discoveryPollToken||version!==workspaceVersion||pollProfile!==profileId)return;
+    attempt++;
+    try{
+      const r=await protectedFetch('/discovery/'+encodeURIComponent(requestId));
+      if(token!==discoveryPollToken||version!==workspaceVersion||pollProfile!==profileId)return;
+      if(r.status===401||r.status===403||r.status===404){stopDiscoveryPolling();return;}
+      if(r.ok){
+        const rec=await r.json();
+        if(token!==discoveryPollToken||version!==workspaceVersion||pollProfile!==profileId)return;
+        if(rec.status==='completed'||rec.status==='failed'||rec.status==='disabled'){
+          await applyDiscoveryState(rec,targetQuery);
+          return;
+        }
+        setDiscoveryBadge(String(rec.status||'queued'));
+        $('discoveryStatus').textContent=rec.status==='running'
+          ?'Scanning official job boards (#'+requestId+') for new roles…'
+          :'Discovery queued (#'+requestId+') · waiting for source scan…';
+      }
+    }catch(_){}
+    if(token!==discoveryPollToken||version!==workspaceVersion||pollProfile!==profileId)return;
+    if(attempt>=maxPolls){
+      stopDiscoveryPolling();
+      $('discoveryStatus').textContent='Discovery is still queued in the background (#'+requestId+'). Run your search again shortly.';
+      $('discoverBtn').disabled=false;
+      return;
+    }
+    const delay=baseMs<200?baseMs:Math.min(3000,Math.round(baseMs*Math.pow(1.15,attempt-1)));
+    discoveryPollTimer=setTimeout(step,delay);
+  };
+  discoveryPollTimer=setTimeout(step,baseMs);
+}
+async function requestDiscovery(){
+  if(discoverySubmitting||activeDiscoveryId!==null||!profileId||!lastSearchQuery)return;
+  const version=workspaceVersion,currentProfile=profileId,targetQuery=lastSearchQuery;
+  discoverySubmitting=true;$('discoverBtn').disabled=true;
+  $('discoveryBar').hidden=false;
+  setDiscoveryBadge('queued');
+  $('discoveryStatus').textContent='Submitting discovery request…';
+  try{
+    const d=await api('/discover/'+encodeURIComponent(currentProfile),{profile_id:currentProfile,query:targetQuery,top_k:10});
+    if(version!==workspaceVersion||currentProfile!==profileId)return;
+    discoverySubmitting=false;
+    await applyDiscoveryState(d.discovery||{status:'disabled'},targetQuery,{fromDirectSubmit:true,initialMatches:d.matches});
+  }catch(e){
+    if(version===workspaceVersion&&currentProfile===profileId){
+      discoverySubmitting=false;
+      setDiscoveryBadge('failed');
+      $('discoveryStatus').textContent='Discovery could not start: '+e.message;
+      $('discoverBtn').disabled=false;
+    }
+  }
+}
+$('discoverBtn').onclick=requestDiscovery;
 async function search(){
   if(searchRunning||!profileId)return;
   const query=$('query').value.trim();
   if(!query){$('searchStatus').textContent='Describe the roles you want to find.';return;}
+  stopDiscoveryPolling();
   const b=$('searchBtn'),version=workspaceVersion,currentProfile=profileId,request=++searchRequest;searchRunning=true;b.disabled=true;
   $('searchStatus').textContent='Searching the index and checking available matches…';
   $('agentActivity').hidden=true;
   try{
     const d=await api('/agent',{profile_id:currentProfile,query,top_k:10});
     if(version!==workspaceVersion||currentProfile!==profileId)return;
+    lastSearchQuery=query;
     if(d.preferences)renderPreferences(d.preferences);
-    if(Array.isArray(d.matches))render(d.matches);
-    else render([]);
+    const matches=Array.isArray(d.matches)?d.matches:[];
+    render(matches);
     renderActivity(d);
-    $('searchStatus').textContent=d.message||'Search returned '+(d.matches||[]).length+' results.';
+    $('searchStatus').textContent=d.message||'Search returned '+matches.length+' results.';
+    const recommendedCount=matches.filter(m=>m.status==='recommended').length;
+    if(d.discovery&&typeof d.discovery==='object'){
+      await applyDiscoveryState(d.discovery,query,{fromAgent:true});
+    }else if(recommendedCount<3){
+      $('discoveryBar').hidden=false;
+      setDiscoveryBadge('');
+      $('discoveryStatus').textContent=matches.length
+        ?'Few verified matches in the current index. Scan official job boards for more opportunities.'
+        :'No matching indexed roles found. Scan official job boards for new opportunities.';
+      $('discoverBtn').disabled=false;
+    }else{
+      $('discoveryBar').hidden=true;
+    }
   }catch(e){if(version===workspaceVersion&&currentProfile===profileId)$('searchStatus').textContent='Search could not complete: '+e.message+' · previous results retained.'}
   finally{if(request===searchRequest){searchRunning=false;b.disabled=false}}
 }

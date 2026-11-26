@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, HttpUrl
 
@@ -11,7 +11,7 @@ from boardforge.agent import JobAgent
 from boardforge.auth import auth_required, authorize_admin, authorize_any_profile, authorize_profile, session_profile
 from boardforge.connectors.detect import detect_source
 from boardforge.database import create_store
-from boardforge.discovery import queue_discovery, run_discovery_request
+from boardforge.discovery import queue_and_dispatch_discovery
 from boardforge.models import (
     CandidateProfile,
     CandidateProfileUpdate,
@@ -106,26 +106,15 @@ def metrics(request: Request):
     return metrics_response()
 
 
-def _schedule_discovery(
-    background_tasks: BackgroundTasks,
+async def _schedule_discovery(
     profile_id: str,
     profile: CandidateProfile,
     query: str = "",
 ) -> dict:
     preferences = store.load_preferences(profile_id)
-    queued = queue_discovery(
+    return await queue_and_dispatch_discovery(
         store, profile_id, profile, preferences, query=query,
     )
-    if queued["status"] == "queued" and not queued["cached"]:
-        background_tasks.add_task(
-            run_discovery_request,
-            store,
-            queued["request_id"],
-            profile,
-            preferences,
-            query=query,
-        )
-    return queued
 
 
 async def _read_limited_body(request: Request, max_bytes: int) -> bytes:
@@ -159,7 +148,6 @@ async def sync(req: SyncRequest, request: Request):
 @app.post("/resume")
 async def upload_resume(
     request: Request,
-    background_tasks: BackgroundTasks,
     profile_id: str = "default",
     filename: str = "resume.pdf",
     recommend: bool = True,
@@ -182,7 +170,7 @@ async def upload_resume(
     recommendations = await core_agent.recommend_jobs(profile_id, 15)
     return {
         "profile": profile.model_dump(),
-        "discovery": _schedule_discovery(background_tasks, profile_id, profile),
+        "discovery": await _schedule_discovery(profile_id, profile),
         **recommendations.data,
     }
 
@@ -239,7 +227,6 @@ async def recommendations(
 async def discover(
     profile_id: str,
     req: SearchRequest,
-    background_tasks: BackgroundTasks,
     request: Request,
 ):
     # req.profile_id is ignored here; ownership follows the path parameter.
@@ -247,7 +234,7 @@ async def discover(
     authorize_profile(request, profile_id)
     profile = store.load_candidate_profile(profile_id) or CandidateProfile()
     result = await core_agent.search_jobs(profile_id, req.query, req.top_k)
-    queued = _schedule_discovery(background_tasks, profile_id, profile, req.query)
+    queued = await _schedule_discovery(profile_id, profile, req.query)
     return {"discovery": queued, **result.data}
 
 

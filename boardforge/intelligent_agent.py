@@ -256,6 +256,11 @@ class ToolCallingAgent:
         if unknown_eligibility:
             notices.append("Some candidates have unresolved eligibility.")
 
+        if state.discovery_requested:
+            notices.append("External source discovery has been queued.")
+        elif state.discovery and state.discovery.get("status") == "disabled":
+            notices.append("External source discovery is disabled.")
+
         if recommended:
             names = ", ".join(
                 f"{item['title']} at {item['company']}"
@@ -304,8 +309,12 @@ class ToolCallingAgent:
         if [item.name for item in planned] != ["search_jobs"]:
             return False
         return not bool(re.search(
-            r"\b(if|unless|otherwise|either|alternative|depending|first|then|"
-            r"not enough|insufficient|compare|instead|change|update|remember)\b",
+            r"\b(if|unless|otherwise|either|alternatives?|depending|first|then|"
+            r"not enough|insufficient|scarce|limited|none\s+found|"
+            r"fallback|fall\s+back|broaden|relax|"
+            r"discover|discovery|external\s+(?:sources?|boards?)|new\s+(?:sources?|boards?)|"
+            r"sync(?:hronize)?\s+(?:trusted\s+)?sources?|"
+            r"compare|save\s+(?:this\s+|my\s+)?preferences?|update\s+(?:my\s+)?preferences?|remember)\b",
             text, re.I,
         ))
 
@@ -369,6 +378,7 @@ class ToolCallingAgent:
                 "recommended_count": state.recommended_count,
                 "last_match_count": state.last_match_count,
                 "discovery_requested": state.discovery_requested,
+                "discovery_request_id": (state.discovery or {}).get("request_id"),
                 "sufficient_results": state.sufficient_results,
                 "stopped_reason": state.stopped_reason,
                 "best_match_count": len(
@@ -445,6 +455,7 @@ class ToolCallingAgent:
             return {
                 "mode": "intelligent-agent", "message": self._grounded_message(state),
                 "trace": state.trace, "tool_results": tool_results, "events": events,
+                "discovery": None,
                 "matches": (
                     (state.best_search or state.last_search)["matches"]
                     if (state.best_search or state.last_search) else []
@@ -470,6 +481,7 @@ class ToolCallingAgent:
                         "total": total_ms,
                     },
                     "provider_trace": [], "discovery_requested": False,
+                    "discovery_request_id": None,
                     "sufficient_results": state.sufficient_results,
                 },
             }
@@ -675,6 +687,17 @@ class ToolCallingAgent:
                         "state": state_snapshot(),
                     })
                     break
+                if name == "discover_job_sources" and result.get("ok"):
+                    state.stopped_reason = (
+                        "discovery_queued"
+                        if state.discovery_requested
+                        else "no_verified_recommendations"
+                    )
+                    await emit({
+                        "type": "stop_condition", "reason": state.stopped_reason,
+                        "state": state_snapshot(),
+                    })
+                    break
                 if result.get("verification_quota_denied"):
                     state.stopped_reason = "verification_incomplete"
                 if state.stopped_reason in {"tool_timeout", "insufficient_remaining_time", "verification_incomplete"}:
@@ -694,6 +717,7 @@ class ToolCallingAgent:
             "trace": state.trace,
             "tool_results": tool_results,
             "events": events,
+            "discovery": state.discovery,
             "matches": (
                 (state.best_search or state.last_search)["matches"]
                 if (state.best_search or state.last_search) else []
@@ -722,6 +746,7 @@ class ToolCallingAgent:
                 },
                 "provider_trace": provider_trace,
                 "discovery_requested": state.discovery_requested,
+                "discovery_request_id": (state.discovery or {}).get("request_id"),
                 "sufficient_results": state.sufficient_results,
             },
         }

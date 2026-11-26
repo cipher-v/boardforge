@@ -187,6 +187,8 @@ def _execution_outcome(result: dict[str, Any]) -> dict[str, Any]:
         classification = "execution_limit"
     elif stop_reason == "sufficient_results":
         classification = "verified_recommendations"
+    elif stop_reason == "discovery_queued":
+        classification = "discovery_queued"
     elif stop_reason == "no_verified_recommendations" and unknown_eligibility:
         classification = "no_verified_recommendations_unknown_eligibility"
     elif stop_reason == "no_verified_recommendations" and matches:
@@ -209,7 +211,7 @@ def _execution_outcome(result: dict[str, Any]) -> dict[str, Any]:
             execution_complete
             and verification_complete
             and stop_reason in {
-                "sufficient_results", "no_verified_recommendations",
+                "sufficient_results", "discovery_queued", "no_verified_recommendations",
             }
         ),
     }

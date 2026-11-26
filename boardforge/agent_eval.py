@@ -111,7 +111,7 @@ class AgentScenario:
     forbidden_tools: tuple[str, ...] = ()
     allowed_repeated_tools: tuple[str, ...] = ()
     acceptable_stops: tuple[str, ...] = (
-        "sufficient_results", "provider_finished", "provider_failure",
+        "sufficient_results", "discovery_queued", "provider_finished", "provider_failure",
         "token_limit", "tool_call_limit", "iteration_limit", "total_timeout",
     )
     expected_state: dict[str, Any] = field(default_factory=dict)

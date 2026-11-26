@@ -331,11 +331,15 @@ class LLMPreferenceExtractor:
 
     def __init__(self):
         self.key = os.getenv("OPENAI_API_KEY")
+        self.enabled = (
+            os.getenv("BOARDFORGE_ENABLE_LLM_PREFERENCES", "0") == "1"
+            and bool(self.key)
+        )
         self.base = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
         self.model = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
 
     async def extract(self, text: str, current: Preferences | None = None) -> Preferences:
-        if not self.key:
+        if not self.enabled:
             return deterministic_extract(text, current)
 
         schema = Preferences.model_json_schema()

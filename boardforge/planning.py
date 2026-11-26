@@ -14,10 +14,21 @@ SEARCH_CUES = re.compile(
     r"what matches|what are|any good|similar|jobs?|roles?|positions?|opportunities|careers?)\b",
     re.I,
 )
+EXPLICIT_PERSISTENCE_CUES = re.compile(
+    r"\b(from now on|going forward|in future(?: searches)?|permanently|always|anymore|"
+    r"save\s+(?:this\s+|these\s+|my\s+)?preferences?|update\s+(?:my\s+)?preferences?|"
+    r"set\s+(?:this\s+|my\s+)?preferences?|persist|remember(?:\s+that|\s+my)?)\b",
+    re.I,
+)
+CONVERSATIONAL_CORRECTION_CUES = re.compile(
+    r"\b(changed my mind|on second thought)\b",
+    re.I,
+)
 DURABLE_PREFERENCE_CUES = re.compile(
-    r"\b(from now on|going forward|in future searches|permanently|anymore|"
-    r"save\s+(?:this\s+|my\s+)?preferences?|update\s+(?:my\s+)?preferences?|"
-    r"remember(?:\s+that)?|changed my mind|salary matters|no minimum salary|"
+    r"\b(from now on|going forward|in future(?: searches)?|permanently|always|anymore|"
+    r"save\s+(?:this\s+|these\s+|my\s+)?preferences?|update\s+(?:my\s+)?preferences?|"
+    r"set\s+(?:this\s+|my\s+)?preferences?|persist|remember(?:\s+that|\s+my)?|"
+    r"salary matters|no minimum salary|"
     r"lower priority|focus on|(?:is|are)\s+(?:okay|fine|good)(?:\s+(?:now|too))?)\b",
     re.I,
 )
@@ -82,6 +93,11 @@ def _is_explicit_preference_update(text: str) -> bool:
     cleaned = NO_EXPERIENCE_PHRASE_RE.sub(" ", text).strip()
     if not cleaned:
         return False
+    if CONVERSATIONAL_CORRECTION_CUES.search(cleaned):
+        return bool(
+            EXPLICIT_PERSISTENCE_CUES.search(cleaned)
+            or NEGATED_SHOW_CUES.search(cleaned)
+        )
     if NEGATED_SHOW_CUES.search(cleaned) or DURABLE_PREFERENCE_CUES.search(cleaned):
         return True
     if FIRST_PERSON_PREFERENCE_CUES.search(cleaned):
