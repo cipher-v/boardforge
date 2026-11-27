@@ -48,6 +48,7 @@ class PostgresStore:
             max_size=max_size,
             kwargs={"row_factory": dict_row},
             configure=self._configure,
+            check=ConnectionPool.check_connection,
             open=True,
         )
         self.migrate()
