@@ -1,5 +1,9 @@
 # Architecture
 
+## Deployed beta snapshot
+
+The deployed application uses Cloud Run, Neon PostgreSQL/pgvector, Vertex AI and a one-shot maintenance job. Cloud Scheduler is configured for twice-daily execution. Private invitation tokens isolate profiles; persistent beta quotas and the cumulative estimated AI budget constrain paid operations. Production discovery is dispatched to the maintenance job. Production settings are intentionally tighter than general configuration examples below. See [results](results.md) for observed validation and limitations.
+
 BoardForge separates deterministic infrastructure from probabilistic model behavior.
 
 ## Data plane

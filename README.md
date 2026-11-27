@@ -1,414 +1,132 @@
 # BoardForge
 
-BoardForge is an evaluation-first job intelligence backend with assisted connector discovery, built around a simple idea:
+An evidence-grounded job discovery and recommendation agent combining hybrid retrieval, resume personalization, persistent preferences and bounded LLM reasoning.
 
-> job search systems should understand changing preferences, track changing job boards, and explain recommendations with evidence.
+[Live application](https://boardforge-api-779231143197.us-central1.run.app/) · [Architecture](docs/architecture.md) · [Evaluation](docs/results.md) · [Deployment](deploy/gcp/README.md)
 
-It is intentionally not another generic RAG demo or auto-apply bot.
+**Status:** Deployed invitation-only beta. Reviewer access is shared privately.
 
-## What it does
+## Why BoardForge?
 
-- Accepts PDF/DOCX/TXT resumes and extracts skills, roles, projects, experience and evidence snippets
-- Lets candidates review inferred skills and confirm target roles before those roles become hard constraints
-- Returns recommendations from the current index immediately, then refreshes after optional background source discovery
-- Detects public ATS providers from career URLs
-- Fetches live jobs from Greenhouse, Lever and Ashby
-- Falls back to JSON-LD JobPosting extraction for generic career pages
-- Normalizes jobs into one schema
-- Tracks sync runs and job discovery, update, closure and reopening events in SQLite
-- Stores persistent candidate preferences and explicit feedback
-- Normalizes INR salary ranges and conservative geography metadata
-- Filters hard constraints before ranking and rejects unknown geography when required
-- Produces structured evidence-backed reasons and risk flags
-- Persists job embeddings by model and content hash so unchanged jobs are not re-embedded
-- Exposes sync, preference, search, feedback and agent APIs
-- Includes ranking, agent, preference and resume-extraction benchmarks plus CI tests
-- Optionally uses an OpenAI-compatible model for structured preference extraction
+Semantic similarity alone cannot establish whether a candidate is eligible for a job. BoardForge separates deterministic eligibility checks, temporal job state and user preferences from probabilistic relevance judgments. It returns evidence and flags uncertain matches rather than treating every result as a recommendation.
 
-## Why this exists
+## Results at a glance
 
-A normal recommender can retrieve semantically similar jobs and still fail badly:
+- 1,097 active jobs in the November 28, 2026 production snapshot.
+- Hybrid candidate recall: **94.37%**, versus 66.81% for lexical retrieval.
+- Recommendation precision after LLM verification: **95.83%**, versus 47.89% before verification, on 32 queries with relevant jobs.
+- Latest recorded full clean-environment regression: 333 passed, 4 skipped.
 
-- recommend an unpaid role to a paid-only candidate
-- recommend a US-only role to an India-only candidate
-- ignore a 3+ year requirement for a fresher
-- repeatedly show a role the candidate rejected
-- keep recommending a role that already closed
-- invent a reason that is not supported by the job metadata
+The offline holdout contains 100 real postings and 36 intents (3,600 AI-audited relevance judgments, not human-verified labels). These metrics are not real-user satisfaction or guaranteed production performance.
 
-BoardForge treats those as first-class engineering failures.
+## Features
+
+- Natural-language search, resume extraction and editable candidate preferences.
+- PostgreSQL full-text and pgvector retrieval, deterministic constraints and evidence reranking.
+- Structured LLM relevance verification and bounded tool-calling agent.
+- Background discovery of official ATS boards and temporal job indexing.
+- Persistent feedback, isolated candidate workspaces and usage quotas.
 
 ## Architecture
 
-```text
-resume ----------------> evidence-backed candidate profile
-                              |
-                              v
-career URL -----------> source discovery queue
-   |
-   v
-source detector
-   |
-   +--> Greenhouse connector
-   +--> Lever connector
-   +--> Ashby connector
-   +--> generic JSON-LD fallback
-   |
-   v
-canonical Job schema
-   |
-   v
-temporal SQLite index
-(sync runs / missing observations / lifecycle events / content hash)
-   |
-   +----------------------+
-   |                      |
-preferences + feedback    |
-   |                      |
-   +-----------> ranker <-+
-                  |
-                  v
-       structured evidence + risks
-                  |
-                  v
-             API / tool-using agent
+```mermaid
+flowchart TD
+    U[Candidate workspace] --> A[FastAPI]
+    A --> P[Profile and preferences]
+    A --> O[Agent orchestration]
+    P --> D[(PostgreSQL + pgvector)]
+    O --> R[Hybrid candidate retrieval]
+    D --> R
+    E[Vertex AI embeddings] --> R
+    R --> F[Constraints and evidence ranking]
+    F --> V[Bounded relevance verification]
+    V --> M[Recommendations and alternatives]
+    M --> U
+    O --> Q[Durable discovery queue]
+    Q --> W[Cloud Run maintenance job]
+    S[Cloud Scheduler] --> W
+    W --> C[Official ATS connectors and discovery]
+    C --> N[Normalization and temporal indexing]
+    N --> D
+    W --> E
 ```
 
-See [docs/architecture.md](docs/architecture.md).
+Ordinary searches use the existing index. Complex conditional requests can invoke bounded reasoning; external discovery runs asynchronously. Known hard constraints remain authoritative.
 
-## Quick start
+## Evaluation
+
+### Retrieval holdout
+
+| Metric | Lexical | Hybrid | Exhaustive reference |
+|---|---:|---:|---:|
+| Candidate recall | 0.6681 | 0.9437 | 1.0000 |
+| Precision@10 | 0.2406 | 0.3312 | 0.3250 |
+| Recall@10 | 0.3791 | 0.5607 | 0.5528 |
+| NDCG@10 | 0.4210 | 0.5771 | 0.5720 |
+
+### Relevance verification (identical retrieval candidate sets)
+
+| Metric | Deterministic hybrid | LLM verified |
+|---|---:|---:|
+| Recommendation precision | 0.4789 | 0.9583 |
+| Recommendation recall | 0.2944 | 0.1991 |
+| Irrelevant recommendation rate | 0.5211 | 0.0417 |
+| NDCG@10 | 0.5771 | 0.6243 |
+| False recommendations | 74 | 2 |
+
+Both tables concern the 32 queries with relevant jobs. Verification trades recall for precision. On four queries without relevant jobs, false recommendations decreased from eight to five. See [measured results](docs/results.md) for resource usage, synthetic benchmarks and limitations.
+
+## Stack
+
+Python, FastAPI, PostgreSQL, pgvector, SQLite (local fallback), Vertex AI Gemini, Tavily, Docker, Cloud Run, Cloud Scheduler, Secret Manager, Neon, pytest and GitHub Actions.
+
+## Local development
+
+Python 3.11 or later. Create a virtual environment:
 
 ```bash
 python -m venv .venv
+```
 
-# Windows
-.venv\Scripts\activate
+Activate it (`.venv/Scripts/activate` on Windows Git Bash; `source .venv/bin/activate` on Linux/macOS), then:
 
-# macOS/Linux
-source .venv/bin/activate
-
+```bash
 pip install -e ".[dev]"
 pytest -q
 uvicorn boardforge.api:app --reload
 ```
 
-Open `http://127.0.0.1:8000` for the local product demo or `/docs` for the API.
-
-### PostgreSQL + pgvector stack
+Open http://127.0.0.1:8000. SQLite is the zero-configuration fallback; optional AI integrations require provider configuration. For PostgreSQL and the independent worker:
 
 ```bash
 docker compose up --build
 ```
 
-This starts three services: the FastAPI application, a PostgreSQL 16 + pgvector
-database, and an independent discovery/source-refresh worker. Migrations are
-versioned under `boardforge/migrations` and applied when a PostgreSQL store starts.
-SQLite remains the zero-configuration test/local fallback when `DATABASE_URL` is unset.
+See [.env.example](.env.example) for configuration. Never use production credentials for local tests.
 
-PostgreSQL uses a GIN full-text index for lexical candidate generation and an
-HNSW pgvector index for semantic candidates. Only a bounded candidate set reaches
-the evidence reranker; the application no longer needs to load the full job index.
-
-Populate or refresh missing job embeddings with:
+## Evaluation commands
 
 ```bash
-python -m boardforge.cli embed-index --batch-size 64 --max-jobs 10000
-```
-
-The independent worker also backfills a bounded number of missing/stale
-embeddings after each discovery/source-refresh cycle. Configure the per-cycle
-budget with `BOARDFORGE_EMBEDDING_JOBS_PER_CYCLE`; unchanged jobs are not sent
-to the provider again.
-
-### Vertex Gemini embeddings
-
-The production semantic-retrieval path can use Vertex AI with an explicit
-768-dimensional embedding contract:
-
-```text
-BOARDFORGE_EMBEDDING_PROVIDER=vertex
-BOARDFORGE_EMBEDDING_MODEL=gemini-embedding-001
-BOARDFORGE_EMBEDDING_DIMENSIONS=768
-GOOGLE_CLOUD_PROJECT=your-project-id
-GOOGLE_CLOUD_LOCATION=us-central1
-BOARDFORGE_ENABLE_EMBEDDINGS=1
-```
-
-BoardForge embeds indexed job documents with `RETRIEVAL_DOCUMENT` and search
-queries with `RETRIEVAL_QUERY`. PostgreSQL stores only 768-dimensional vectors,
-and model/provider/dimension are part of the cache key so incompatible embedding
-spaces are not mixed. Local development uses Google Application Default
-Credentials; deployed environments should use their workload/service identity
-rather than committed credential files.
-
-Vertex calls retry bounded `429` and transient `5xx` responses with exponential
-backoff. `/ready` reports the active embedding model, indexed-job coverage and
-backlog; `/metrics` exposes provider request status/latency and backlog metrics.
-
-For a reproducible Cloud Run service + scheduled-job deployment, see
-[`deploy/gcp`](deploy/gcp/README.md). The container reads Cloud Run's injected
-`PORT`; the maintenance image supports `python -m boardforge.worker --once` for
-Cloud Run Jobs.
-
-The included browser UI is intentionally a single-user local demo. It stores the
-extracted profile, preferences and feedback in SQLite, never the raw resume, and
-provides a **Delete my data** action. Add real authentication and per-user
-authorization before exposing it as a public multi-user service.
-
-API deployments can enable profile isolation with a JSON token map and a separate
-admin token. Authentication is disabled when these variables are empty:
-
-```text
-BOARDFORGE_PROFILE_TOKENS={"candidate-secret-token":"candidate-profile-id"}
-BOARDFORGE_ADMIN_TOKEN=admin-secret-token
-```
-
-Protected requests use `Authorization: Bearer <token>`. For a consumer product,
-replace static tokens with an external OIDC provider while keeping the same
-profile-ownership boundary.
-
-## Optional background web discovery
-
-Search always returns from the current index first. With Tavily configured,
-BoardForge queues a deduplicated discovery request, records source provenance,
-discovers Greenhouse/Lever/Ashby boards with one Basic search request restricted
-to supported ATS domains, syncs those boards after the response, and lets the UI
-poll for a refreshed result set.
-
-```text
-BOARDFORGE_SEARCH_PROVIDER=tavily
-TAVILY_API_KEY=...
-BOARDFORGE_DISCOVERY_TTL_SECONDS=900
-```
-
-Brave remains an optional fallback provider:
-
-```text
-BOARDFORGE_SEARCH_PROVIDER=brave
-BOARDFORGE_BRAVE_API_KEY=...
-```
-
-Do not commit real API keys. Keep them in the local shell, a local `.env` file,
-or the deployment platform's secret manager.
-
-The FastAPI demo executes queued work in-process. Request state is durable and a
-separate process can drain/recover pending work with:
-
-```bash
-python -m boardforge.cli discovery-worker --limit 10
-```
-
-A production deployment should run this worker independently with scheduling,
-retry policy and telemetry.
-
-## Live-source CLI demo
-
-```bash
-python -m boardforge.cli sync https://job-boards.greenhouse.io/skildai-careers
-python -m boardforge.cli sync https://jobs.lever.co/trackmind
-
-python -m boardforge.cli prefs "I want AI/ML, computer vision or backend roles in India. Avoid hardware-heavy roles and unpaid internships."
-
-python -m boardforge.cli search "Python LLM retrieval roles" --top-k 10
-```
-
-## API
-
-### Sync a career page
-
-```http
-POST /sync
-```
-
-```json
-{"url":"https://job-boards.greenhouse.io/skildai-careers"}
-```
-
-The response reports how many roles were inserted, updated, unchanged or closed.
-
-### Update durable preferences
-
-```http
-POST /preferences
-```
-
-```json
-{
-  "profile_id":"tanish",
-  "text":"I only want India-eligible roles. Avoid unpaid and hardware-heavy positions."
-}
-```
-
-### Search with memory
-
-```http
-POST /search
-```
-
-```json
-{
-  "profile_id":"tanish",
-  "query":"LLM agents retrieval backend",
-  "top_k":10
-}
-```
-
-### Record feedback
-
-```http
-POST /feedback
-```
-
-```json
-{
-  "profile_id":"tanish",
-  "job_id":"greenhouse:example:123",
-  "verdict":"reject",
-  "note":"Too hardware-heavy"
-}
-```
-
-Rejected jobs are suppressed in later searches.
-
-## Optional structured LLM extraction
-
-Without an API key, BoardForge uses a deterministic preference extractor.
-
-Set these environment variables to enable structured model output:
-
-```text
-OPENAI_API_KEY=...
-OPENAI_BASE_URL=https://api.openai.com/v1
-OPENAI_MODEL=gpt-4.1-mini
-```
-
-The LLM is intentionally kept at the probabilistic boundary. Ingestion, persistence, hard constraints, state tracking and evaluation remain deterministic and testable.
-
-## Optional relevance verification
-
-BoardForge can conservatively verify the deterministic recommendation shortlist
-with structured LLM calls. It is disabled by default. When enabled, it checks
-both recommendations and plausible uncertain candidates before final top-K.
-
-```text
-BOARDFORGE_ENABLE_RELEVANCE_VERIFIER=1
-BOARDFORGE_RELEVANCE_PROVIDER=vertex
-GOOGLE_CLOUD_PROJECT=boardforge-ai-2026
-BOARDFORGE_RELEVANCE_VERTEX_LOCATION=global
-BOARDFORGE_RELEVANCE_MODEL=gemini-3.8-flash
-BOARDFORGE_RELEVANCE_BATCH_SIZE=8
-BOARDFORGE_RELEVANCE_MAX_CANDIDATES=20
-```
-
-Vertex uses Application Default Credentials locally and the Cloud Run service
-account in production; it does not use a Gemini API key. Set the provider to
-`groq`, plus `BOARDFORGE_RELEVANCE_API_KEY` and
-`BOARDFORGE_GROQ_RELEVANCE_MODEL=openai/gpt-oss-120b`, to use the alternative
-adapter. Groq output is capped at 1,280 tokens; token-aware planning prefers
-batches of at most four and preserves descriptions up to the configured
-12,000-character ceiling.
-
-The verifier batches candidates, requires stable source evidence references, and
-caches judgments. Direct matches are recommendations, adjacent matches are
-identified alternatives, irrelevant matches are omitted, and uncertain or
-failed judgments remain `needs_verification`. Unknown eligibility, confirmed
-vacancy closure, hard constraints, and rejected-job memory remain authoritative.
-Candidate descriptions are passed as untrusted data and instructions inside
-them are never part of the verifier control prompt.
-
-Each search is additionally bounded by model-call, token, retry, concurrency,
-output-token, and thinking-token settings. Provider metadata records input,
-output and thinking tokens, latency, HTTP attempts, and estimated cost.
-
-## Optional intelligent agent
-
-The `/agent` endpoint uses the deterministic planner unless explicitly enabled.
-The intelligent mode keeps the existing `JobAgent` core and adds bounded native
-function calling through Vertex Gemini:
-
-```text
-BOARDFORGE_ENABLE_INTELLIGENT_AGENT=1
-BOARDFORGE_AGENT_PROVIDER=vertex
-BOARDFORGE_AGENT_MAX_ITERATIONS=4
-BOARDFORGE_AGENT_MAX_TOOL_CALLS=8
-BOARDFORGE_AGENT_MAX_TOKENS_PER_TURN=20000
-BOARDFORGE_AGENT_TOTAL_TIMEOUT_SECONDS=45
-```
-
-It searches the index before discovery, reads persistent profile/preferences and
-feedback, and can queue discovery or synchronize only registered trusted sources.
-Preference and feedback writes require deterministic authorization from the
-current user turn. Set `BOARDFORGE_AGENT_PROVIDER=groq` to select the existing
-Groq key and fixed `openai/gpt-oss-120b` model manually; there is no automatic
-provider fallback. Model calls share the persistent cumulative budget ledger.
-
-Plan the holdout comparison without making model calls:
-
-```bash
+python -m boardforge.cli benchmark
+python -m boardforge.cli agent-eval
+python -m boardforge.cli preference-eval
+python -m boardforge.cli resume-eval
+python -m boardforge.cli holdout-eval
 python -m boardforge.cli relevance-eval
 ```
 
-Paid execution is deliberately separate and requires `--execute` plus an
-isolated evaluation database.
+The last two commands default to planning mode; paid execution requires explicit flags and isolated storage.
 
-## Temporal intelligence
+## Production and limitations
 
-The same source is synced repeatedly. BoardForge records first-seen time, last observation, content changes, disappearance from the source, and active/closed state. Jobs close only after two consecutive successful observations in which they are absent. Empty or abnormally shrunken source responses are rejected rather than interpreted as mass closures.
+The beta uses invitation credentials, profile authorization, persistent UTC-day quotas and an estimated cumulative AI-cost ledger. Cloud Scheduler is configured for twice-daily maintenance. Raw resume files are not persisted; extracted profile and usage information may be retained. Refreshing the browser requires reopening the invitation in a new tab or re-authenticating.
 
-This lets the system answer a more useful question than “what jobs exist?”:
+- AI-audited labels and a small frozen corpus limit generalization.
+- Production embedding coverage is partial; production verifier limits differ from the offline experiment.
+- Complex live-agent validation remains incomplete; human feedback is still needed.
+- Job eligibility and availability must be confirmed at the original posting.
+- Static invitations are a beta mechanism, not consumer-grade identity management.
 
-> what changed since the last sync?
+## Documentation
 
-## Evaluation
-
-Run `python -m boardforge.cli benchmark` for the 120-case adversarial ranking suite. Run `python -m boardforge.cli compare --markdown-out results/ranking.md` for lexical → constrained → evidence → feedback ablations, `python -m boardforge.cli agent-eval` for the 40-case production-fallback tool planner, `python -m boardforge.cli preference-eval` for natural-language preference extraction, and `python -m boardforge.cli resume-eval` for resume profile extraction. These datasets are synthetic regression/evaluation fixtures, not claims of real-user product quality.
-
-See [docs/evaluation.md](docs/evaluation.md).
-
-## Current ATS support
-
-| Source | Method |
-|---|---|
-| Greenhouse | Public job-board API |
-| Lever | Public postings API |
-| Ashby | Public job-board API |
-| Generic career page | JSON-LD JobPosting extraction |
-
-## Next major milestone
-
-Planned production milestones:
-
-1. persistent hybrid full-text/vector retrieval
-2. real-user labels to complement the packaged 120-case ranking and 40-case agent-tool benchmarks
-3. an external discovery/sync worker with retries and operational telemetry
-4. automatic validation of learned manifests against browser-visible counts
-
-The project explicitly excludes authentication bypass and protected/private API access.
-
-## Interview story
-
-> I wanted to build a career agent on top of reliable job-search infrastructure rather than hide retrieval behind an LLM. BoardForge turns a resume into editable evidence, keeps inferred roles soft until the candidate confirms them, returns indexed results immediately, and discovers new ATS sources in the background. Deterministic constraints, temporal job state, feedback memory and versioned evals keep the agent measurable rather than anecdotal.
-
-
-## Learn an unknown public career site from a browser HAR
-
-BoardForge can infer a reusable connector manifest from a public browser network capture.
-
-1. Open the public careers page in your browser.
-2. Open DevTools -> Network.
-3. Reload the page and export the network log as HAR.
-4. Run:
-
-```bash
-python -m boardforge.cli learn-har careers.har --out connector-manifests.json
-```
-
-BoardForge scans JSON/XHR responses for job-like record sets, scores candidate endpoints, infers the response path and field mapping, and writes reusable manifests.
-
-Inspect the generated manifest, then sync it:
-
-```bash
-python -m boardforge.cli sync-manifest connector-manifests.json --index 0
-```
-
-Only public GET endpoints are executed by learned manifests. HAR entries with authentication, cookies, API keys or sensitive query parameters are ignored. Private/local network targets and redirects are rejected.
+[Architecture](docs/architecture.md) · [Evaluation methodology](docs/evaluation.md) · [Measured results](docs/results.md) · [Engineering log](docs/engineering-log.md) · [Historical development reference](docs/development-reference.md) · [GCP deployment](deploy/gcp/README.md)

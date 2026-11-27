@@ -211,46 +211,8 @@ The controlled v1.1 run is stored locally in:
 The run made 136 successful Vertex requests with no retries. Do not rerun it to
 reproduce summary tables: regenerate the Markdown from the cached JSON rows.
 
-## Optional LLM relevance-verifier comparison
+## LLM relevance-verifier comparison
 
-The verifier evaluation consumes the saved hybrid per-query candidate sets, so
-deterministic and LLM-verified paths begin with identical retrieval output. It
-reports both precision deltas and recovery of relevant candidates that the
-deterministic policy marked `needs_verification`.
-The default command is plan-only and makes no provider call:
+The completed v3 experiment compared identical frozen hybrid candidate sets across all 36 queries. See [measured results](results.md) for observed metrics, costs and limitations. Labels are AI-audited, not human-verified.
 
-```bash
-python -m boardforge.cli relevance-eval
-```
-
-Current empty-cache plan: 285 candidate judgments in 58 calls with batches of
-up to eight, approximately 388,445 input and 34,200 output tokens (422,645
-total), plus a maximum configured 7,424 thinking tokens. At the currently
-configured Gemini 3.8 Flash introductory rates, the pre-run ceiling is about
-$0.4474. The estimate is deliberately conservative and depends on the configured
-description cap. It includes eligible recommended and uncertain rows; protected
-eligibility rows are not sent.
-The v1.1 labels remain **AI-audited, not human-verified**.
-
-An authorized execution would require all of the following (do not run it for
-planning):
-
-```text
-BOARDFORGE_RELEVANCE_PROVIDER=vertex
-GOOGLE_CLOUD_PROJECT=boardforge-ai-2026
-BOARDFORGE_RELEVANCE_VERTEX_LOCATION=global
-BOARDFORGE_RELEVANCE_MODEL=gemini-3.8-flash
-BOARDFORGE_RELEVANCE_BATCH_SIZE=8
-BOARDFORGE_RELEVANCE_MAX_CANDIDATES=10
-python -m boardforge.cli relevance-eval --execute --database-url <isolated-evaluation-postgres-url>
-```
-
-The evaluation cap is ten because it reuses the already frozen top-10 hybrid
-pools. Production may use the separately configured 20-candidate pool.
-
-One live eight-candidate smoke batch measured 8,505 input, 1,148 output and zero
-thinking tokens. Scaling the plan by the observed input/output estimation error
-produces a central full-run estimate of about 337,942 input and 40,898 output
-tokens, or $0.4068. Allow roughly $0.45–$0.50 for candidate-mix variance and
-thinking. This is measured extrapolation, not a guarantee; the full evaluation
-has not been run.
+`python -m boardforge.cli relevance-eval` defaults to plan-only mode. Paid execution requires `--execute` and an isolated evaluation database; use the cached local reports to inspect prior results rather than rerunning paid calls.
