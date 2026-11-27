@@ -10,6 +10,7 @@ from typing import Any
 import httpx
 
 from boardforge.database import StoreProtocol
+from boardforge import beta
 from boardforge.discovery.web import SearchProvider, create_search_provider, discover_and_sync
 from boardforge.models import CandidateProfile, Preferences
 from boardforge.preferences import effective_search_preferences, strip_orchestration_instructions
@@ -66,6 +67,9 @@ def queue_discovery(
                 "web discovery is disabled; search uses the existing local index"
             ),
         }
+    if not beta.admit(store, "discovery", profile_id):
+        return {"request_id": None, "status": "disabled", "cached": False,
+                "report": None, "reason": "Daily discovery limit reached. Existing job search remains available."}
     return store.queue_discovery(
         profile_id,
         discovery_fingerprint(profile, preferences, query, profile_id=profile_id),

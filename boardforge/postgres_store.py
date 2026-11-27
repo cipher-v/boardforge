@@ -1006,6 +1006,31 @@ class PostgresStore:
                 ),
             )
 
+    def consume_beta_usage(self, profile_id: str, operation: str, limit: int,
+                           global_limit: int | None = None) -> bool:
+        # Serialize admission for each operation/day across instances, then
+        # update the user counter in the same transaction. No global sentinel row.
+        with self.connect() as connection:
+            day = connection.execute("SELECT (now() AT TIME ZONE 'UTC')::date AS day").fetchone()["day"]
+            connection.execute("SELECT pg_advisory_xact_lock(hashtext(%s), hashtext(%s))",
+                               (str(day), "beta:" + operation))
+            if global_limit is not None:
+                total = connection.execute(
+                    "SELECT COALESCE(SUM(count),0) AS total FROM beta_daily_usage WHERE day=%s AND operation=%s",
+                    (day, operation),
+                ).fetchone()["total"]
+                if total >= global_limit:
+                    return False
+            row = connection.execute(
+                """INSERT INTO beta_daily_usage(day,profile_id,operation,count)
+                   VALUES(%s,%s,%s,1)
+                   ON CONFLICT(day,profile_id,operation) DO UPDATE
+                   SET count=beta_daily_usage.count+1
+                   WHERE beta_daily_usage.count < %s RETURNING count""",
+                (day, profile_id, operation, limit),
+            ).fetchone()
+            return row is not None
+
     def usage_cost_summary(self) -> dict:
         with self.connect() as connection:
             row = connection.execute(

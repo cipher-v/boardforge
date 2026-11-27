@@ -14,6 +14,7 @@ import httpx
 from pydantic import AliasChoices, BaseModel, Field, ValidationError
 
 from boardforge.confidence import GENERIC_QUERY_TERMS, occupational_query_text
+from boardforge import beta
 from boardforge.enrich import extract_fresher_eligibility_evidence, salary_min_lpa
 from boardforge.llm import (
     LLMCallResult,
@@ -939,6 +940,19 @@ class RelevanceVerifier:
                 )
                 * retry_reservation_multiplier
             )
+            if not beta.admit(self.store, "verification"):
+                return {
+                    "judgments": {
+                        match.job.stable_id: self._fallback(
+                            match.job.stable_id, "Daily AI verification limit reached; verification required",
+                        ) for match in batch
+                    },
+                    "denial": {"reason": "beta_daily_verification_limit", "used_tokens": 0,
+                               "retry_after_seconds": 0, "waited_seconds": 0},
+                    "waited": 0, "reserved": 0, "calls": 0, "attempts": 0,
+                    "failure": None, "usage": TokenUsage(), "latency": None,
+                    "cost": 0.0, "response_metadata": {}, "candidate_validation_failures": {},
+                }
             if hasattr(self.provider, "provider_name"):
                 reservation_id = str(uuid.uuid4())
                 is_groq = isinstance(self.provider, OpenAICompatibleRelevanceProvider)

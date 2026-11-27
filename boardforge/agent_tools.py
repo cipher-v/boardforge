@@ -287,11 +287,17 @@ class AgentToolExecutor:
                 state.user_text, arguments.authorization_quote
             ):
                 return {"ok": False, "error": "preference_update_not_authorized"}
+            from boardforge import beta
+            if not beta.admit(self.store, "preferences", state.profile_id):
+                return {"ok": False, "error": "daily_preference_limit"}
             updated = await self.core.update_preferences(state.profile_id, arguments.text)
             result = {"preferences": updated.data}
         elif name == "record_job_feedback":
             if arguments.job_id not in state.user_text or arguments.verdict not in state.user_text.casefold():
                 return {"ok": False, "error": "feedback_not_explicitly_authorized"}
+            from boardforge import beta
+            if not beta.admit(self.store, "feedback", state.profile_id):
+                return {"ok": False, "error": "daily_feedback_limit"}
             recorded = await self.core.record_feedback(FeedbackRequest(
                 profile_id=state.profile_id, **arguments.model_dump()
             ))
@@ -385,7 +391,8 @@ class AgentToolExecutor:
         else:  # synchronize_trusted_source
             from boardforge.quarantine import is_quarantined_source
 
-            if not self.allow_sync:
+            from boardforge import beta
+            if beta.enabled() or not self.allow_sync:
                 return {"ok": False, "error": "source_sync_disabled_for_evaluation"}
             if is_quarantined_source(arguments.source_kind, arguments.source_key):
                 return {"ok": False, "error": "source_quarantined"}

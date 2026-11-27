@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import time
 from boardforge.models import FeedbackRequest
+from boardforge import beta
 from boardforge.database import StoreProtocol
 from boardforge.planning import plan_tools
 from boardforge.preferences import LLMPreferenceExtractor, effective_search_preferences, preserve_search_constraints
@@ -203,6 +204,8 @@ class JobAgent:
 
     async def record_feedback(self, req: FeedbackRequest) -> AgentResult:
         self.store.record_feedback(req)
+        if req.verdict in {"save", "reject"}:
+            beta.record(self.store, req.verdict + "_completed", req.profile_id)
         return AgentResult("Feedback recorded.", req.model_dump())
 
     async def handle(self, profile_id: str, text: str, top_k: int = 10) -> AgentResult:

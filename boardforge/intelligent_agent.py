@@ -12,6 +12,7 @@ from typing import Any, Awaitable, Callable, Protocol
 import httpx
 
 from boardforge.agent import JobAgent
+from boardforge import beta
 from boardforge.agent_tools import AgentExecutionState, AgentToolExecutor, native_tool_declarations
 from boardforge.llm import LLMCallResult, LLMRequest, TokenUsage, VertexGeminiLLMProvider
 from boardforge.planning import plan_tools
@@ -247,7 +248,9 @@ class ToolCallingAgent:
         if stop_notice:
             notices.append(stop_notice)
 
-        if state.stopped_reason.startswith("budget_"):
+        if state.stopped_reason == "budget_beta_daily_reasoning_limit":
+            notices.append("Daily AI reasoning limit reached. Try a simpler job search or return tomorrow (UTC).")
+        elif state.stopped_reason.startswith("budget_"):
             notices.append("The processing budget limit was reached.")
 
         outcome_notices = {
@@ -697,6 +700,13 @@ class ToolCallingAgent:
             if usage.total_tokens + reserved_tokens > self.max_tokens:
                 state.stopped_reason = "token_limit"
                 await emit({"type": "limit_reached", "limit": "token_limit", "state": state_snapshot()})
+                break
+            if not beta.admit(self.core.store, "reasoning", profile_id):
+                state.stopped_reason = "budget_beta_daily_reasoning_limit"
+                await emit({"type": "limit_reached", "limit": state.stopped_reason,
+                            "state": state_snapshot()})
+                # Preserve existing tool results. If no search has run, do not
+                # silently reinterpret a complex request as a simple one.
                 break
             retry_capacity = 1 + int(getattr(self.provider, "max_retries", 0))
             reservation_id: str | None = None

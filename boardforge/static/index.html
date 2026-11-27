@@ -399,7 +399,7 @@ function render(matches){
   }
   $('results').innerHTML=matches.map(m=>{
     const j=m.job||m,status=m.status||'needs_verification';
-    const uniqueReasons=dedupList(m.reasons),uniqueRisks=dedupList(m.risks);
+    const uniqueReasons=dedupList(m.reasons),uniqueRisks=dedupList((m.risks||[]).map(x=>String(x).replace('deterministic restriction cannot be overridden: experience_eligibility_unknown','Experience eligibility cannot be confirmed from the posting.')));
     const profileSkillSet=new Set((activeProfile?.skills||[]).map(x=>String(x).trim().toLowerCase()));
     const matchedSkills=dedupList((m.evidence||[]).filter(e=>e&&e.kind==='preferred_term'&&profileSkillSet.has(String(e.value||'').trim().toLowerCase())).map(e=>e.value));
     const uniqueEvidence=dedupList((m.evidence||[]).map(e=>e&&e.detail));
@@ -420,13 +420,18 @@ function render(matches){
       <div class="details"><div class="detail"><b>Match information</b>${reasons}</div><div class="detail"><b>Risks / unknowns</b>${risks}</div></div>
       ${evidence?'<details class="source-evidence"><summary>Supporting evidence</summary>'+evidence+'</details>':''}
       <div class="actions">
-        ${apply?'<a class="action" target="_blank" rel="noopener" href="'+esc(apply)+'">Open role ↗</a>':''}
+        ${apply?'<a class="action" target="_blank" rel="noopener noreferrer" href="'+esc(apply)+'">Open role ↗</a>':''}
         <button class="action feedback" data-v="save">Save</button>
         <button class="action reject feedback" data-v="reject">Reject</button>
       </div>
     </article>`;
   }).join('');
   document.querySelectorAll('.feedback').forEach(btn=>btn.onclick=()=>feedback(btn));
+  document.querySelectorAll('.job a.action').forEach(link=>{
+    const report=()=>{protectedFetch('/beta/apply-click',{method:'POST',keepalive:true}).catch(()=>{});};
+    link.addEventListener('click',report);
+    link.addEventListener('auxclick',e=>{if(e.button===1)report();});
+  });
 }
 async function feedback(btn){
   const card=btn.closest('.job'),version=workspaceVersion,currentProfile=profileId;
@@ -760,7 +765,9 @@ $('inviteForm').onsubmit=async e=>{
   try{await connect($('inviteToken').value.trim());}finally{$('inviteSubmit').disabled=false;}
 };
 $('signOut').onclick=()=>{sessionAttempt++;inviteToken='';profileId=null;resetWorkspace();location.reload()};
-connect();
+const initialInvite = new URLSearchParams(location.hash.slice(1)).get('invite') || '';
+if(initialInvite){history.replaceState(null,'',location.pathname+location.search);}
+connect(initialInvite);
 </script>
 </body>
 </html>

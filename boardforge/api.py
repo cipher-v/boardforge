@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, HttpUrl
 
 from boardforge.agent import JobAgent
+from boardforge import beta
 from boardforge.auth import auth_required, authorize_admin, authorize_any_profile, authorize_profile, session_profile
 from boardforge.connectors.detect import detect_source
 from boardforge.database import create_store
@@ -39,7 +40,11 @@ app.middleware("http")(request_observability)
 
 @app.middleware("http")
 async def private_response_cache_control(request: Request, call_next):
-    response = await call_next(request)
+    context_token = beta.current_profile.set(None)
+    try:
+        response = await call_next(request)
+    finally:
+        beta.current_profile.reset(context_token)
     private_prefixes = (
         "/candidate-profile/", "/recommendations/", "/discovery/", "/preferences/",
     )
@@ -154,6 +159,10 @@ async def upload_resume(
 ):
     _reject_nul_param(profile_id, filename)
     authorize_profile(request, profile_id)
+    beta.current_profile.set(profile_id)
+    beta.require(store, "resume", profile_id)
+    if recommend:
+        beta.require(store, "search", profile_id)
     data = await _read_limited_body(request, 5 * 1024 * 1024)
     if not data:
         raise HTTPException(status_code=400, detail="resume file is empty")
@@ -165,9 +174,11 @@ async def upload_resume(
     if not profile.skills and not profile.role_signals and not profile.education:
         raise HTTPException(status_code=400, detail="could not extract a useful profile from this resume")
     store.save_candidate_profile(profile_id, profile)
+    beta.record(store, "resume_completed", profile_id)
     if not recommend:
         return {"profile": profile.model_dump(), "matches": []}
     recommendations = await core_agent.recommend_jobs(profile_id, 15)
+    beta.record(store, "search_completed", profile_id)
     return {
         "profile": profile.model_dump(),
         "discovery": await _schedule_discovery(profile_id, profile),
@@ -187,6 +198,7 @@ def candidate_profile(profile_id: str, request: Request):
 def update_candidate_profile(profile_id: str, req: CandidateProfileUpdate, request: Request):
     _reject_nul_param(profile_id)
     authorize_profile(request, profile_id)
+    beta.require(store, "profile_update", profile_id)
     profile = store.load_candidate_profile(profile_id)
     if profile is None:
         raise HTTPException(status_code=404, detail="candidate profile not found")
@@ -219,7 +231,10 @@ async def recommendations(
 ):
     _reject_nul_param(profile_id)
     authorize_profile(request, profile_id)
+    beta.current_profile.set(profile_id)
+    beta.require(store, "search", profile_id)
     result = await core_agent.recommend_jobs(profile_id, top_k)
+    beta.record(store, "search_completed", profile_id)
     return result.data
 
 
@@ -232,8 +247,11 @@ async def discover(
     # req.profile_id is ignored here; ownership follows the path parameter.
     _reject_nul_param(profile_id)
     authorize_profile(request, profile_id)
+    beta.current_profile.set(profile_id)
+    beta.require(store, "search", profile_id)
     profile = store.load_candidate_profile(profile_id) or CandidateProfile()
     result = await core_agent.search_jobs(profile_id, req.query, req.top_k)
+    beta.record(store, "search_completed", profile_id)
     queued = await _schedule_discovery(profile_id, profile, req.query)
     return {"discovery": queued, **result.data}
 
@@ -280,6 +298,7 @@ def reset_preferences(profile_id: str, request: Request):
 @app.post("/preferences")
 async def preferences(req: PreferenceUpdate, request: Request):
     authorize_profile(request, req.profile_id)
+    beta.require(store, "preferences", req.profile_id)
     result = await core_agent.update_preferences(req.profile_id, req.text)
     return {"message":result.message,"preferences":result.data}
 
@@ -287,13 +306,18 @@ async def preferences(req: PreferenceUpdate, request: Request):
 @app.post("/search")
 async def search(req: SearchRequest, request: Request):
     authorize_profile(request, req.profile_id)
+    beta.current_profile.set(req.profile_id)
+    beta.require(store, "search", req.profile_id)
     result = await core_agent.search_jobs(req.profile_id, req.query, req.top_k)
+    beta.record(store, "search_completed", req.profile_id)
     return result.data
 
 
 @app.post("/feedback")
 async def feedback(req: FeedbackRequest, request: Request):
     authorize_profile(request, req.profile_id)
+    beta.current_profile.set(req.profile_id)
+    beta.require(store, "feedback", req.profile_id)
     result = await core_agent.record_feedback(req)
     return {"message":result.message,**result.data}
 
@@ -301,4 +325,18 @@ async def feedback(req: FeedbackRequest, request: Request):
 @app.post("/agent")
 async def agent_turn(req: SearchRequest, request: Request):
     authorize_profile(request, req.profile_id)
-    return await tool_agent.run(req.profile_id, req.query, top_k=req.top_k)
+    beta.current_profile.set(req.profile_id)
+    beta.require(store, "search", req.profile_id)
+    result = await tool_agent.run(req.profile_id, req.query, top_k=req.top_k)
+    if any(step.get("ok") and step.get("tool") in {"search_jobs", "search_indexed_jobs"}
+           for step in result.get("trace", []) if isinstance(step, dict)):
+        beta.record(store, "search_completed", req.profile_id)
+    return result
+
+
+@app.post("/beta/apply-click")
+def beta_apply_click(request: Request):
+    profile_id = session_profile(request)
+    if beta.enabled():
+        beta.require(store, "apply_click", profile_id)
+    return {"ok": True}
